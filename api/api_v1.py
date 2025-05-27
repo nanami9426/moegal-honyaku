@@ -18,8 +18,8 @@ DET_MODEL_PATH = "models/comic-text-segmenter.pt"
 DET_MODEL = YOLO(DET_MODEL_PATH)
 logger.info("模型加载成功")
 
-FONT_PATH = "simhei.ttf"
-DEFAULT_FONT_SIZE = 14
+FONT_PATH = "fonts/LXGWWenKai-Regular.ttf"
+DEFAULT_FONT_SIZE = 15
 FONT = ImageFont.truetype(FONT_PATH, DEFAULT_FONT_SIZE)
 LINE_HEIGHT = FONT.getbbox("中")[3] - FONT.getbbox("中")[1]
 logger.info("字体加载成功")
@@ -40,7 +40,7 @@ ernie_headers = {
 async def translate_req_openai(text):
     text = f'{text}'
     res = await OPEN_AI_CLIENT.responses.parse(
-        model="gpt-4.1-mini",
+        model="gpt-4o",
         input=[
             {"role": "system", "content": "将列表中的句子翻译成中文（句子中的音译词、人名等可以直接用罗马音表示）"},
             {

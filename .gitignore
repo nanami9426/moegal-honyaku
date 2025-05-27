@@ -20,6 +20,9 @@ __pycache__/
 models/*
 !models/.gitkeep
 
+fonts/*
+!fonts/.gitkeep
+
 .ipynb_checkpoints/
 
 build/
