@@ -10,13 +10,15 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 import asyncio
 import aiohttp
+import torch
 
 load_dotenv()
 
-MOCR = MangaOcr()
+DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+MOCR = MangaOcr(pretrained_model_name_or_path="models/manga-ocr-base")
 DET_MODEL_PATH = "models/comic-text-segmenter.pt"
-DET_MODEL = YOLO(DET_MODEL_PATH)
-logger.info("模型加载成功")
+DET_MODEL = YOLO(DET_MODEL_PATH).to(DEVICE)
+logger.info(f"气泡检测模型加载成功，使用：{DET_MODEL.device}")
 
 FONT_PATH = "fonts/LXGWWenKai-Regular.ttf"
 DEFAULT_FONT_SIZE = 15
