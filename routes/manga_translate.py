@@ -22,6 +22,11 @@ async def translate(img: UploadFile = File(...)):
     res = DET_MODEL(img_bgr_cv)
     bboxes = res[0].boxes.xyxy.cpu().numpy()
     all_text, inpaint = await get_text_masked_pic(img_pil, img_bgr_cv, bboxes, False)
+    if len(all_text) == 0:
+        return JSONResponse(content={
+        "status": "error",
+        "info": "未检测出文字"
+    })
     try:
         # cn_text = await translate_req_openai(all_text)
         cn_text = await translate_req_ernie(all_text)
@@ -35,8 +40,9 @@ async def translate(img: UploadFile = File(...)):
     b64_img = base64.b64encode(buffer).decode("utf8")
     duration = round(time.time() - start, 2)
     return JSONResponse(content={
-        "res_img": b64_img,
         "status": "success",
         "duration": duration,
-        "cn_text": cn_text
+        "cn_text": cn_text,
+        "raw_text": all_text,
+        "res_img": b64_img,
     })
