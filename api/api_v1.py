@@ -14,17 +14,20 @@ import torch
 
 load_dotenv()
 
-DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-MOCR = MangaOcr(pretrained_model_name_or_path="assets/models/manga-ocr-base")
-DET_MODEL_PATH = "assets/models/comic-text-segmenter.pt"
-DET_MODEL = YOLO(DET_MODEL_PATH).to(DEVICE)
-logger.info(f"气泡检测模型加载成功，使用：{DET_MODEL.device}")
-
 FONT_PATH = "assets/fonts/LXGWWenKai-Regular.ttf"
 DEFAULT_FONT_SIZE = 15
 FONT = ImageFont.truetype(FONT_PATH, DEFAULT_FONT_SIZE)
 LINE_HEIGHT = FONT.getbbox("中")[3] - FONT.getbbox("中")[1]
 logger.info("字体加载成功")
+
+DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+DET_MODEL_PATH = "assets/models/comic-text-segmenter.pt"
+DET_MODEL = YOLO(DET_MODEL_PATH).to(DEVICE)
+logger.info(f"气泡检测模型加载成功，使用：{DET_MODEL.device}")
+
+
+
+MOCR = MangaOcr(pretrained_model_name_or_path="assets/models/manga-ocr-base")
 
 OPEN_AI_CLIENT = AsyncOpenAI(
     base_url='https://api.openai-proxy.org/v1',

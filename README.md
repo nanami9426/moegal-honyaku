@@ -2,12 +2,8 @@
 
 Translate Japanese manga into Chinese.
 
-example1:
+example:
 
-![example1](./assets/pics/example1.jpg)
+![example1](./assets/pics/example1.png)
 
 
-
-example2:
-
-![example2](./assets/pics/example2.jpg)

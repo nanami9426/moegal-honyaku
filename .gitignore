@@ -20,9 +20,6 @@ __pycache__/
 assets/models/*
 !assets/models/.gitkeep
 
-assets/models/*
-!assets/models/.gitkeep
-
 .ipynb_checkpoints/
 
 build/
