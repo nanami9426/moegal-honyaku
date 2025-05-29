@@ -15,12 +15,12 @@ import torch
 load_dotenv()
 
 DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-MOCR = MangaOcr(pretrained_model_name_or_path="models/manga-ocr-base")
-DET_MODEL_PATH = "models/comic-text-segmenter.pt"
+MOCR = MangaOcr(pretrained_model_name_or_path="assets/models/manga-ocr-base")
+DET_MODEL_PATH = "assets/models/comic-text-segmenter.pt"
 DET_MODEL = YOLO(DET_MODEL_PATH).to(DEVICE)
 logger.info(f"气泡检测模型加载成功，使用：{DET_MODEL.device}")
 
-FONT_PATH = "fonts/LXGWWenKai-Regular.ttf"
+FONT_PATH = "assets/fonts/LXGWWenKai-Regular.ttf"
 DEFAULT_FONT_SIZE = 15
 FONT = ImageFont.truetype(FONT_PATH, DEFAULT_FONT_SIZE)
 LINE_HEIGHT = FONT.getbbox("中")[3] - FONT.getbbox("中")[1]
@@ -63,7 +63,7 @@ async def translate_req_ernie_single(session, sentence):
         "messages": [
             {
                 "role": "system",
-                "content": '将句子翻译成中文（句子中的音译词、人名等可以直接用罗马音表示，如果是符号就直接输出），不要加任何多余的说明，直接给出翻译结果'
+                "content": '将句子翻译成中文（句子是漫画中的，音译词、人名直接用罗马音表示，如果是符号就直接输出），不要加任何多余的说明，直接给出翻译结果'
             },
             {
                 "role": "user",

@@ -17,11 +17,11 @@ __pycache__/
 *.sqlite3
 *.db
 
-models/*
-!models/.gitkeep
+assets/models/*
+!assets/models/.gitkeep
 
-fonts/*
-!fonts/.gitkeep
+assets/models/*
+!assets/models/.gitkeep
 
 .ipynb_checkpoints/
 
