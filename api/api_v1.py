@@ -25,8 +25,6 @@ DET_MODEL_PATH = "assets/models/comic-text-segmenter.pt"
 DET_MODEL = YOLO(DET_MODEL_PATH).to(DEVICE)
 logger.info(f"气泡检测模型加载成功，使用：{DET_MODEL.device}")
 
-
-
 MOCR = MangaOcr(pretrained_model_name_or_path="assets/models/manga-ocr-base")
 
 OPEN_AI_CLIENT = AsyncOpenAI(
@@ -37,10 +35,13 @@ OPEN_AI_CLIENT = AsyncOpenAI(
 class HonyakuEvent(BaseModel):
     result: list[str]
 
-ernie_headers = {
+ERINE_HEADERS = {
     'Content-Type': 'application/json',
     'Authorization': f'Bearer {os.getenv("API_KEY_HONYAKU_ERNIE")}'
 }
+
+ERNIE_PROMPT_PRICE = 0.003 / 1000
+ERNIE_COMPLETION_PRICE = 0.009 / 1000
 
 async def translate_req_openai(text):
     text = f'{text}'
@@ -58,7 +59,6 @@ async def translate_req_openai(text):
     event = res.output_parsed
     return event.result
 
-
 async def translate_req_ernie_single(session, sentence):
     url = "https://qianfan.baidubce.com/v2/chat/completions"
     payload = {
@@ -66,7 +66,7 @@ async def translate_req_ernie_single(session, sentence):
         "messages": [
             {
                 "role": "system",
-                "content": '将句子翻译成中文（句子是漫画中的，音译词、人名直接用罗马音表示，如果是符号就直接输出），不要加任何多余的说明，直接给出翻译结果'
+                "content": '将句子翻译成中文（音译词、人名直接用罗马音表示，如果是符号就直接输出，不要加任何解释、注解或括号内容，仅保留自然对话或原声风格的翻译。）'
             },
             {
                 "role": "user",
@@ -74,17 +74,16 @@ async def translate_req_ernie_single(session, sentence):
             }
         ],
     }
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {os.getenv("API_KEY_HONYAKU_ERNIE")}'
-    }
 
-    async with session.post(url, headers=headers, json=payload) as response:
+    async with session.post(url, headers=ERINE_HEADERS, json=payload) as response:
         resp_json = await response.json()
-        return resp_json["choices"][0]["message"]["content"]
+        prompt_tokens = resp_json["usage"]["prompt_tokens"]
+        completion_tokens = resp_json["usage"]["completion_tokens"]
+        return resp_json["choices"][0]["message"]["content"], prompt_tokens*ERNIE_PROMPT_PRICE + completion_tokens*ERNIE_COMPLETION_PRICE
 
 async def translate_req_ernie(all_text):
     async with aiohttp.ClientSession() as session:
         tasks = [translate_req_ernie_single(session, sentence) for sentence in all_text]
-        res_text = await asyncio.gather(*tasks)
-        return res_text
+        res = await asyncio.gather(*tasks)
+        res_text, price = zip(*res)
+        return res_text, sum(price)
