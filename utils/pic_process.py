@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 import asyncio
-from api.api_v1 import MOCR, FONT, LINE_HEIGHT
+from api.api_v1 import MOCR, FontConfig
 
 
 async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
@@ -51,8 +51,12 @@ def draw_text_on_boxes(image: np.ndarray, boxes: list, texts: list) -> np.ndarra
     for box, text in zip(boxes, texts):
         x1, y1, x2, y2 = map(int, box)
         box_width = x2 - x1
-        lines = wrap_text_by_width(draw, text, FONT, box_width)
+        box_height = y2 - y1
+        font_config = FontConfig(box_height, box_width, text)
+        font = font_config.font
+        lines = wrap_text_by_width(draw, text, font, box_width)
+        line_height = font.getbbox("中")[3] - font.getbbox("中")[1]
         for i, line in enumerate(lines):
-            y = y1 + i * (LINE_HEIGHT + line_spacing)
-            draw.text((x1, y), line, font=FONT, fill=(0, 64, 0))
+            y = y1 + i * (line_height + line_spacing)
+            draw.text((x1, y), line, font=font, fill=(0, 64, 0))
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)

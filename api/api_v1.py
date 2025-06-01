@@ -13,12 +13,29 @@ import aiohttp
 import torch
 
 load_dotenv()
-
 FONT_PATH = "assets/fonts/LXGWWenKai-Regular.ttf"
-DEFAULT_FONT_SIZE = 15
-FONT = ImageFont.truetype(FONT_PATH, DEFAULT_FONT_SIZE)
-LINE_HEIGHT = FONT.getbbox("中")[3] - FONT.getbbox("中")[1]
-logger.info("字体加载成功")
+
+class FontConfig:
+    def __init__(self, max_height, max_width, text, font_path=FONT_PATH):
+        self.font_path = font_path
+        self.font_size = self._find_font_size(max_height, max_width, len(text))
+
+    def _find_font_size(self, max_height, max_width, n):
+        font_size = 10
+        while True:
+            font = ImageFont.truetype(self.font_path, font_size)
+            bbox = font.getbbox("中")
+            h = bbox[3] - bbox[1]
+            w = bbox[2] - bbox[0]
+            if h * w * n >= max_height * max_width * 0.55:
+                break
+            font_size +=1
+        return font_size -1
+    
+    @property
+    def font(self):
+        return ImageFont.truetype(self.font_path, self.font_size)
+
 
 DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 DET_MODEL_PATH = "assets/models/comic-text-segmenter.pt"
