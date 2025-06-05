@@ -2,8 +2,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 import asyncio
-from api.api_v1 import MOCR, FontConfig
-
+from api.ocr import MOCR
+from api.font_conf import FontConfig
 
 async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
     mask = np.zeros(image_cv.shape[:2], dtype=np.uint8)

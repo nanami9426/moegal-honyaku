@@ -1,48 +1,11 @@
-import json
-import requests
-from ultralytics import YOLO
-from manga_ocr import MangaOcr
-from utils.logger import logger
-from PIL import ImageFont
 import os
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 import asyncio
 import aiohttp
-import torch
 
 load_dotenv()
-FONT_PATH = "assets/fonts/LXGWWenKai-Regular.ttf"
-
-class FontConfig:
-    def __init__(self, max_height, max_width, text, font_path=FONT_PATH):
-        self.font_path = font_path
-        self.font_size = self._find_font_size(max_height, max_width, len(text))
-
-    def _find_font_size(self, max_height, max_width, n):
-        font_size = 10
-        while True:
-            font = ImageFont.truetype(self.font_path, font_size)
-            bbox = font.getbbox("中")
-            h = bbox[3] - bbox[1]
-            w = bbox[2] - bbox[0]
-            if h * w * n >= max_height * max_width * 0.55:
-                break
-            font_size +=1
-        return font_size -1
-    
-    @property
-    def font(self):
-        return ImageFont.truetype(self.font_path, self.font_size)
-
-
-DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-DET_MODEL_PATH = "assets/models/comic-text-segmenter.pt"
-DET_MODEL = YOLO(DET_MODEL_PATH).to(DEVICE)
-logger.info(f"气泡检测模型加载成功，使用：{DET_MODEL.device}")
-
-MOCR = MangaOcr(pretrained_model_name_or_path="assets/models/manga-ocr-base")
 
 OPEN_AI_CLIENT = AsyncOpenAI(
     base_url='https://api.openai-proxy.org/v1',

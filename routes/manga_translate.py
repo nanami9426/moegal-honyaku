@@ -4,7 +4,8 @@ import numpy as np
 import cv2
 import base64
 import requests
-from api.api_v1 import DET_MODEL, translate_req_openai, translate_req_ernie
+from api.translate_api import translate_req_openai, translate_req_ernie
+from api.ocr import DET_MODEL
 from PIL import Image
 from utils.pic_process import get_text_masked_pic, draw_text_on_boxes
 import time
