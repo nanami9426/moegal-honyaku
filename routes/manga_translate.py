@@ -11,6 +11,7 @@ from utils.pic_process import get_text_masked_pic, draw_text_on_boxes
 import time
 from utils.logger import logger
 from pydantic import BaseModel
+from utils.custom_conf import custom_conf
 
 manga_translate_router = APIRouter()
 
@@ -32,8 +33,10 @@ async def translate_upload(img: UploadFile = File(...)):
         "info": "未检测出文字"
     })
     try:
-        # cn_text = await translate_req_openai(all_text)
-        cn_text, price = await translate_req_ernie(all_text)
+        if custom_conf.translate_api_type == "ernie":
+            cn_text, price = await translate_req_ernie(all_text)
+        elif custom_conf.translate_api_type == "openai":
+            cn_text = await translate_req_openai(all_text)
         img_res = draw_text_on_boxes(inpaint, bboxes, cn_text)
     except Exception as e:
         logger.error(f"{e}")
@@ -88,7 +91,12 @@ async def translate_web(req: ImageUrl):
                 "info": "未检测出文字"
             })
         # cn_text = await translate_req_openai(all_text)
-        cn_text, price = await translate_req_ernie(all_text)
+        # cn_text, price = await translate_req_ernie(all_text)
+        if custom_conf.translate_api_type == "ernie":
+            cn_text, price = await translate_req_ernie(all_text)
+        elif custom_conf.translate_api_type == "openai":
+            cn_text = await translate_req_openai(all_text)
+
         img_res = draw_text_on_boxes(inpaint, bboxes, cn_text)
         _, buffer = cv2.imencode('.png', img_res)
         b64_img = base64.b64encode(buffer).decode("utf8")
