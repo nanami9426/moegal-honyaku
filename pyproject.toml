@@ -1,0 +1,19 @@
+[project]
+name = "moegal-honyaku"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp>=3.12.10",
+    "colorlog>=6.9.0",
+    "fastapi>=0.115.12",
+    "load-dotenv>=0.1.0",
+    "manga-ocr>=0.1.14",
+    "openai>=1.84.0",
+    "opencv-python>=4.11.0.86",
+    "pillow>=11.2.1",
+    "python-multipart>=0.0.20",
+    "ultralytics>=8.3.151",
+    "uvicorn>=0.34.3",
+]
