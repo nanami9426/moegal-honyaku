@@ -54,7 +54,6 @@ async def translate_req_ernie_single(session, sentence):
             }
         ],
     }
-
     async with session.post(url, headers=ERINE_HEADERS, json=payload) as response:
         resp_json = await response.json()
         prompt_tokens = resp_json["usage"]["prompt_tokens"]

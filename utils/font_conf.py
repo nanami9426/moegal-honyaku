@@ -16,7 +16,7 @@ class FontConfig:
             w = bbox[2] - bbox[0]
             if h * w * n >= max_height * max_width * 0.55:
                 break
-            font_size +=1
+            font_size += 1
         return font_size -1
     
     @property

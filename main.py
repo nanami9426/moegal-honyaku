@@ -18,8 +18,9 @@ app.add_middleware(
 )
 
 from routes.manga_translate import manga_translate_router
-
+from routes.update_conf import update_conf_router
 app.include_router(manga_translate_router)
+app.include_router(update_conf_router)
 
 if __name__ == '__main__':
     # Load .env file
