@@ -42,7 +42,16 @@ git clone https://github.com/nanami9426/moegal-honyaku-fe.git
    # 然后将.env文件中的相关值修改成自己想要的就可以了
    ~~~
 
-5. 运行项目
+5. 模型文件下载
+
+   [气泡检测模型](https://huggingface.co/ogkalu/comic-text-segmenter-yolov8m/tree/main)
+
+   [日文识别模型](https://huggingface.co/kha-white/manga-ocr-base)
+
+   将两个模型分别下载到`assets/models/`文件夹中。
+
+6. 运行项目
+
    ~~~bash
    gmake run
    ~~~
