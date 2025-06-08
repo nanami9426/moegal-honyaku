@@ -1,6 +1,4 @@
 from utils.logger import logger
-from dotenv import load_dotenv
-load_dotenv()
 
 class CustomConf:
     def __init__(
