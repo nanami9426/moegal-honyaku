@@ -7,11 +7,12 @@ import requests
 from api.translate_api import translate_req_openai, translate_req_ernie
 from api.ocr import DET_MODEL
 from PIL import Image
-from utils.pic_process import get_text_masked_pic, draw_text_on_boxes
+from utils.pic_process import get_text_masked_pic, draw_text_on_boxes, save_img
 import time
 from utils.logger import logger
 from pydantic import BaseModel
 from utils.custom_conf import custom_conf
+import random
 
 manga_translate_router = APIRouter()
 
@@ -48,6 +49,9 @@ async def translate_upload(img: UploadFile = File(...)):
     b64_img = base64.b64encode(buffer).decode("utf8")
     duration = round(time.time() - start, 2)
     logger.info(f"翻译图片成功，耗时 {duration} 秒，花费 {round(price, 8)} 元")
+    file_name = f"{int(time.time() * 1000)}_{random.randint(1000, 9999)}.png"
+    save_img(buffer.tobytes(), "cn", file_name)
+    save_img(file_bytes, "raw", file_name)
     return JSONResponse(content={
         "status": "success",
         "duration": duration,
@@ -102,6 +106,9 @@ async def translate_web(req: ImageUrl):
         b64_img = base64.b64encode(buffer).decode("utf8")
         duration = round(time.time() - start, 2)
         logger.info(f"翻译图片成功，耗时 {duration} 秒，花费 {round(price, 8)} 元")
+        file_name = f"{int(time.time() * 1000)}_{random.randint(1000, 9999)}.png"
+        save_img(buffer.tobytes(), "cn", file_name)
+        save_img(file_bytes, "raw", file_name)
         return JSONResponse(content={
             "status": "success",
             "duration": duration,
