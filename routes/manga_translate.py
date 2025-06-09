@@ -48,10 +48,10 @@ async def translate_upload(img: UploadFile = File(...)):
     _, buffer = cv2.imencode('.png', img_res)
     b64_img = base64.b64encode(buffer).decode("utf8")
     duration = round(time.time() - start, 2)
-    logger.info(f"翻译图片成功，耗时 {duration} 秒，花费 {round(price, 8)} 元")
     file_name = f"{int(time.time() * 1000)}_{random.randint(1000, 9999)}.png"
     save_img(buffer.tobytes(), "cn", file_name)
     save_img(file_bytes, "raw", file_name)
+    logger.info(f"翻译图片成功，耗时 {duration} 秒，花费 {round(price, 8)} 元，保存为{file_name}")
     return JSONResponse(content={
         "status": "success",
         "duration": duration,
@@ -105,10 +105,10 @@ async def translate_web(req: ImageUrl):
         _, buffer = cv2.imencode('.png', img_res)
         b64_img = base64.b64encode(buffer).decode("utf8")
         duration = round(time.time() - start, 2)
-        logger.info(f"翻译图片成功，耗时 {duration} 秒，花费 {round(price, 8)} 元")
         file_name = f"{int(time.time() * 1000)}_{random.randint(1000, 9999)}.png"
         save_img(buffer.tobytes(), "cn", file_name)
         save_img(file_bytes, "raw", file_name)
+        logger.info(f"翻译图片成功，耗时 {duration} 秒，花费 {round(price, 8)} 元，保存为{file_name}")
         return JSONResponse(content={
             "status": "success",
             "duration": duration,

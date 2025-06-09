@@ -5,8 +5,6 @@ import asyncio
 from api.ocr import MOCR
 from utils.font_conf import FontConfig
 import os
-import time
-import random
 
 async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
     mask = np.zeros(image_cv.shape[:2], dtype=np.uint8)
