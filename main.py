@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from utils.pic_process import wrap_text_by_width
 
 
 app = FastAPI()
