@@ -23,6 +23,9 @@ assets/models/*
 saved/*
 !saved/.gitkeep
 
+logs/*
+!logs/.gitkeep
+
 .ipynb_checkpoints/
 
 build/
