@@ -1,4 +1,4 @@
-from utils.logger import logger
+from app.core.logger import logger
 
 TRANSLATE_API_TYPE_OPTIONS = ("dashscope", "openai")
 TRANSLATE_MODE_OPTIONS = ("parallel", "structured")
@@ -32,7 +32,8 @@ class CustomConf:
             "status": "success"
         }
 
-    def to_dict(self, exclude=[]):
+    def to_dict(self, exclude=None):
+        exclude = exclude or []
         assert isinstance(exclude, list)
         return {
             k: v for k, v in self.__dict__.items() if k not in exclude

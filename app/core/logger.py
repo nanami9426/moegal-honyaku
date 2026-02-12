@@ -1,10 +1,10 @@
 import logging
 import sys
-import os
 from colorlog import ColoredFormatter
 
-logger_path = "./logs"
-os.makedirs(logger_path, exist_ok=True)
+from app.core.paths import LOGS_DIR
+
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 logger = logging.getLogger("moegal")
 logger.setLevel(logging.DEBUG)
@@ -25,7 +25,7 @@ console_formatter = ColoredFormatter(
 console_handler.setFormatter(console_formatter)
 
 
-file_handler = logging.FileHandler(os.path.join(logger_path, "app.log"), encoding='utf-8')
+file_handler = logging.FileHandler(LOGS_DIR / "app.log", encoding='utf-8')
 file_handler.setLevel(logging.DEBUG)
 
 file_formatter = logging.Formatter(

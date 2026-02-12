@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from utils.custom_conf import (
+from app.core.custom_conf import (
     custom_conf,
     TRANSLATE_API_TYPE_OPTIONS,
     TRANSLATE_MODE_OPTIONS,

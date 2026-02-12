@@ -4,15 +4,16 @@ import numpy as np
 import cv2
 import base64
 import requests
-from api.translate_api import translate_req
-from api.ocr import DET_MODEL
 from PIL import Image
-from utils.pic_process import get_text_masked_pic, draw_text_on_boxes, save_img
 import time
-from utils.logger import logger
 from pydantic import BaseModel
-from utils.custom_conf import custom_conf
 import random
+
+from app.core.custom_conf import custom_conf
+from app.core.logger import logger
+from app.services.ocr import DET_MODEL
+from app.services.pic_process import get_text_masked_pic, draw_text_on_boxes, save_img
+from app.services.translate_api import translate_req
 
 manga_translate_router = APIRouter()
 

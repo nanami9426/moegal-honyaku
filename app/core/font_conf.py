@@ -1,10 +1,12 @@
 from PIL import ImageFont
 
-FONT_PATH = "assets/fonts/LXGWWenKai-Regular.ttf"
+from app.core.paths import FONTS_DIR
+
+FONT_PATH = FONTS_DIR / "LXGWWenKai-Regular.ttf"
 
 class FontConfig:
     def __init__(self, max_height, max_width, text, font_path=FONT_PATH):
-        self.font_path = font_path
+        self.font_path = str(font_path)
         self.font_size = self._find_font_size(max_height, max_width, len(text))
 
     def _find_font_size(self, max_height, max_width, n):

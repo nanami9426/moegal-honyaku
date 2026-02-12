@@ -2,9 +2,10 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 import asyncio
-from api.ocr import MOCR
-from utils.font_conf import FontConfig
-import os
+
+from app.core.font_conf import FontConfig
+from app.core.paths import SAVED_DIR
+from app.services.ocr import MOCR
 
 async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
     mask = np.zeros(image_cv.shape[:2], dtype=np.uint8)
@@ -63,7 +64,7 @@ def draw_text_on_boxes(image: np.ndarray, boxes: list, texts: list) -> np.ndarra
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 def save_img(file_bytes, pre: str, file_name: str):
-    folder_path = os.path.join("saved", pre)
-    os.makedirs(folder_path, exist_ok=True)
-    with open(os.path.join(folder_path, file_name), "wb") as f:
+    folder_path = SAVED_DIR / pre
+    folder_path.mkdir(parents=True, exist_ok=True)
+    with open(folder_path / file_name, "wb") as f:
         f.write(file_bytes)
