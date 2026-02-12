@@ -2,19 +2,37 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 import asyncio
+import os
 
 from app.core.font_conf import FontConfig
 from app.core.paths import SAVED_DIR
 from app.services.ocr import MOCR
 
+OCR_MAX_CONCURRENCY = max(1, int(os.getenv("OCR_MAX_CONCURRENCY", "2")))
+
+
+def _sanitize_bbox(bbox, width: int, height: int):
+    x1, y1, x2, y2 = map(int, bbox)
+    x1 = max(0, min(x1, width - 1))
+    y1 = max(0, min(y1, height - 1))
+    x2 = max(x1 + 1, min(x2, width))
+    y2 = max(y1 + 1, min(y2, height))
+    return x1, y1, x2, y2
+
+
 async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
     mask = np.zeros(image_cv.shape[:2], dtype=np.uint8)
+    if len(bboxes) == 0:
+        return [], image_cv
+
+    height, width = image_cv.shape[:2]
+    semaphore = asyncio.Semaphore(min(OCR_MAX_CONCURRENCY, len(bboxes)))
+
     async def ocr_and_mask(bbox):
-        # 识别文字
-        cropped_image = image_pil.crop(bbox)
-        text = await asyncio.to_thread(MOCR, cropped_image)
-        # 创建掩码
-        x1, y1, x2, y2 = map(int, bbox)
+        x1, y1, x2, y2 = _sanitize_bbox(bbox, width, height)
+        cropped_image = image_pil.crop((x1, y1, x2, y2))
+        async with semaphore:
+            text = await asyncio.to_thread(MOCR, cropped_image)
         mask[y1:y2, x1:x2] = 255
         if not inpaint:
             image_cv[y1:y2, x1:x2] = (255, 255, 255)

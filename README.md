@@ -76,6 +76,13 @@ curl -X POST "http://127.0.0.1:8000/api/v1/translate/upload" \
   -F "img=@./assets/pics/example1.png"
 ```
 
+如不需要返回 `res_img`（base64，体积较大），可关闭：
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/translate/upload?include_res_img=false" \
+  -F "img=@./assets/pics/example1.png"
+```
+
 2. 通过图片 URL 翻译
 
 ```bash
@@ -83,8 +90,17 @@ curl -X POST "http://127.0.0.1:8000/api/v1/translate/web" \
   -H "Content-Type: application/json" \
   -d '{
     "image_url": "https://example.com/xxx.png",
-    "referer": "https://example.com"
+    "referer": "https://example.com",
+    "include_res_img": false
   }'
+```
+
+### 5.1 性能相关参数（可选）
+
+可通过环境变量限制 OCR 并发线程数（默认 `2`）：
+
+```env
+OCR_MAX_CONCURRENCY=2
 ```
 
 3. 配置接口
