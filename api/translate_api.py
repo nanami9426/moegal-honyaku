@@ -1,68 +1,165 @@
+import asyncio
+import json
 import os
+import re
+
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
-from pydantic import BaseModel
-import asyncio
-import aiohttp
 
 load_dotenv()
 
-OPEN_AI_CLIENT = AsyncOpenAI(
-    base_url='https://api.openai-proxy.org/v1',
-    api_key=os.getenv("API_KEY_HONYAKU_OPENAI"),
+# 统一翻译风格：仅输出翻译内容，不附加解释。
+TRANSLATE_SYSTEM_PROMPT = "将句子翻译成中文（如果是符号就直接输出，不要加任何解释、注解或括号内容，仅保留自然对话或原声风格的翻译。）"
+TRANSLATE_STRUCTURED_SYSTEM_PROMPT = (
+    "你会收到一个 JSON 数组，每项是待翻译句子。"
+    "请返回 JSON：{\"result\": [\"翻译1\", \"翻译2\", ...]}。"
+    "只输出 JSON，不要输出任何多余文本。"
 )
 
-class HonyakuEvent(BaseModel):
-    result: list[str]
 
-ERINE_HEADERS = {
-    'Content-Type': 'application/json',
-    'Authorization': f'Bearer {os.getenv("API_KEY_HONYAKU_ERNIE")}'
-}
+# DashScope OpenAI 兼容接口配置，可通过 .env 覆盖默认值。
+DASHSCOPE_BASE_URL = os.getenv(
+    "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+)
+DASHSCOPE_MODEL = os.getenv("DASHSCOPE_MODEL", "qwen3-max")
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 
-ERNIE_PROMPT_PRICE = 0.003 / 1000
-ERNIE_COMPLETION_PRICE = 0.009 / 1000
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai-proxy.org/v1")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-async def translate_req_openai(text):
-    text = f'{text}'
-    res = await OPEN_AI_CLIENT.responses.parse(
-        model="gpt-4o",
-        input=[
-            {"role": "system", "content": "将列表中的句子翻译成中文（句子中的音译词、人名等可以直接用罗马音表示）"},
-            {
-            "role": "user",
-            "content": text,
-            },
+# 复用单个异步客户端，避免重复建立连接。
+ALI_CLIENT = AsyncOpenAI(
+    api_key=DASHSCOPE_API_KEY,
+    base_url=DASHSCOPE_BASE_URL,
+)
+
+OPENAI_CLIENT = AsyncOpenAI(
+    api_key=OPENAI_API_KEY,
+    base_url=OPENAI_BASE_URL,
+)
+
+
+def _normalize_content(content) -> str:
+    # 兼容字符串或多段内容结构，统一为纯文本。
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                parts.append(str(item.get("text", "")))
+            else:
+                parts.append(str(item))
+        return "".join(parts).strip()
+    return str(content or "").strip()
+
+
+def _provider_options(api_type: str):
+    if api_type == "dashscope":
+        if not DASHSCOPE_API_KEY:
+            raise RuntimeError("DASHSCOPE_API_KEY 未配置")
+        return ALI_CLIENT, DASHSCOPE_MODEL, {"extra_body": {"enable_thinking": False}}
+    if api_type == "openai":
+        if not OPENAI_API_KEY:
+            raise RuntimeError("OPENAI_API_KEY 未配置")
+        return OPENAI_CLIENT, OPENAI_MODEL, {}
+    raise RuntimeError(f"不支持的 translate_api_type: {api_type}")
+
+
+def _extract_json_payload(raw: str):
+    text = raw.strip()
+    candidates = [text]
+
+    # 兼容 ```json ... ``` 包裹。
+    if text.startswith("```"):
+        stripped = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", text)
+        stripped = re.sub(r"\n?```$", "", stripped)
+        candidates.append(stripped.strip())
+
+    # 兼容模型前后夹杂说明文本的情况。
+    obj_match = re.search(r"\{[\s\S]*\}", text)
+    arr_match = re.search(r"\[[\s\S]*\]", text)
+    if obj_match:
+        candidates.append(obj_match.group(0))
+    if arr_match:
+        candidates.append(arr_match.group(0))
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except Exception:
+            continue
+    raise RuntimeError("结构化输出解析失败，模型返回非 JSON")
+
+
+def _parse_structured_result(raw: str, expected_count: int):
+    payload = _extract_json_payload(raw)
+    if isinstance(payload, dict):
+        result = payload.get("result")
+    elif isinstance(payload, list):
+        result = payload
+    else:
+        result = None
+    if not isinstance(result, list):
+        raise RuntimeError("结构化输出格式错误，缺少 result 列表")
+    normalized = [str(item).strip() for item in result]
+    if len(normalized) != expected_count:
+        raise RuntimeError(
+            f"结构化输出数量不匹配，期望 {expected_count} 条，实际 {len(normalized)} 条"
+        )
+    return normalized
+
+
+async def _translate_single(sentence: str, api_type: str):
+    if not sentence:
+        return "", 0.0
+    client, model, extra_kwargs = _provider_options(api_type)
+    res = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": TRANSLATE_SYSTEM_PROMPT},
+            {"role": "user", "content": sentence},
         ],
-        text_format=HonyakuEvent
+        **extra_kwargs,
     )
-    event = res.output_parsed
-    return event.result
+    content = _normalize_content(res.choices[0].message.content)
+    return content, 0.0
 
-async def translate_req_ernie_single(session, sentence):
-    url = "https://qianfan.baidubce.com/v2/chat/completions"
-    payload = {
-        "model": "ernie-4.5-turbo-vl-32k",
-        "messages": [
-            {
-                "role": "system",
-                "content": '将句子翻译成中文（音译词、人名直接用罗马音表示，如果是符号就直接输出，不要加任何解释、注解或括号内容，仅保留自然对话或原声风格的翻译。）'
-            },
-            {
-                "role": "user",
-                "content": sentence
-            }
+
+async def _translate_parallel(all_text, api_type: str):
+    # 并行模式：每个句子独立请求，整体用 gather 并发。
+    tasks = [_translate_single(sentence, api_type) for sentence in all_text]
+    if not tasks:
+        return [], 0.0
+    res = await asyncio.gather(*tasks)
+    res_text, prices = zip(*res)
+    return list(res_text), sum(prices)
+
+
+async def _translate_structured(all_text, api_type: str):
+    # 结构化模式：一次性输入列表，要求模型返回翻译列表 JSON。
+    if not all_text:
+        return [], 0.0
+    client, model, extra_kwargs = _provider_options(api_type)
+    payload = json.dumps(all_text, ensure_ascii=False)
+    res = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": TRANSLATE_STRUCTURED_SYSTEM_PROMPT},
+            {"role": "user", "content": payload},
         ],
-    }
-    async with session.post(url, headers=ERINE_HEADERS, json=payload) as response:
-        resp_json = await response.json()
-        prompt_tokens = resp_json["usage"]["prompt_tokens"]
-        completion_tokens = resp_json["usage"]["completion_tokens"]
-        return resp_json["choices"][0]["message"]["content"], prompt_tokens*ERNIE_PROMPT_PRICE + completion_tokens*ERNIE_COMPLETION_PRICE
+        **extra_kwargs,
+    )
+    raw = _normalize_content(res.choices[0].message.content)
+    return _parse_structured_result(raw, len(all_text)), 0.0
 
-async def translate_req_ernie(all_text):
-    async with aiohttp.ClientSession() as session:
-        tasks = [translate_req_ernie_single(session, sentence) for sentence in all_text]
-        res = await asyncio.gather(*tasks)
-        res_text, price = zip(*res)
-        return res_text, sum(price)
+
+async def translate_req(all_text, api_type: str = "dashscope", translate_mode: str = "parallel"):
+    if translate_mode == "parallel":
+        return await _translate_parallel(all_text, api_type)
+    if translate_mode == "structured":
+        return await _translate_structured(all_text, api_type)
+    raise RuntimeError(f"不支持的 translate_mode: {translate_mode}")

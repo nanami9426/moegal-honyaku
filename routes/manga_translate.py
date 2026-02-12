@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 import base64
 import requests
-from api.translate_api import translate_req_openai, translate_req_ernie
+from api.translate_api import translate_req
 from api.ocr import DET_MODEL
 from PIL import Image
 from utils.pic_process import get_text_masked_pic, draw_text_on_boxes, save_img
@@ -34,10 +34,12 @@ async def translate_upload(img: UploadFile = File(...)):
         "info": "未检测出文字"
     })
     try:
-        if custom_conf.translate_api_type == "ernie":
-            cn_text, price = await translate_req_ernie(all_text)
-        elif custom_conf.translate_api_type == "openai":
-            cn_text = await translate_req_openai(all_text)
+        # 根据配置选择供应商(openai/dashscope)与模式(structured/parallel)。
+        cn_text, price = await translate_req(
+            all_text,
+            api_type=custom_conf.translate_api_type,
+            translate_mode=custom_conf.translate_mode,
+        )
         img_res = draw_text_on_boxes(inpaint, bboxes, cn_text)
     except Exception as e:
         logger.error(f"{e}")
@@ -94,12 +96,12 @@ async def translate_web(req: ImageUrl):
                 "status": "error",
                 "info": "未检测出文字"
             })
-        # cn_text = await translate_req_openai(all_text)
-        # cn_text, price = await translate_req_ernie(all_text)
-        if custom_conf.translate_api_type == "ernie":
-            cn_text, price = await translate_req_ernie(all_text)
-        elif custom_conf.translate_api_type == "openai":
-            cn_text = await translate_req_openai(all_text)
+        # 根据配置选择供应商(openai/dashscope)与模式(structured/parallel)。
+        cn_text, price = await translate_req(
+            all_text,
+            api_type=custom_conf.translate_api_type,
+            translate_mode=custom_conf.translate_mode,
+        )
 
         img_res = draw_text_on_boxes(inpaint, bboxes, cn_text)
         _, buffer = cv2.imencode('.png', img_res)
