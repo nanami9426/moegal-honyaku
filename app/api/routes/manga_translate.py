@@ -66,7 +66,7 @@ async def _translate_image_bytes(
     img_bgr_cv, img_pil = _decode_image(file_bytes)
     res = DET_MODEL(img_bgr_cv, verbose=False)
     bboxes = res[0].boxes.xyxy.cpu().numpy()
-    all_text, inpaint = await get_text_masked_pic(img_pil, img_bgr_cv, bboxes, False)
+    all_text, inpaint = await get_text_masked_pic(img_pil, img_bgr_cv, bboxes, True)
     if len(all_text) == 0:
         logger.warning("未检测出文字")
         return None, None, None, None
