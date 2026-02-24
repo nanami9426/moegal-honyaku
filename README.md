@@ -8,19 +8,14 @@
 
 ![example2](./assets/pics/example2.png)
 
-接口返回中包含：
-- `raw_text`：OCR 原文列表
-- `cn_text`：翻译结果列表
-- `res_img`：回填后图片（base64）
-- `duration`：处理耗时
-- `price`：当前代码中固定为 `0.0`（计费逻辑未启用）
+
 
 ## 项目部署与使用
 
 ### 1. 环境准备
 
 - Python `3.12`
-- `uv`（用于环境与依赖管理）
+- `uv`
 
 ### 2. 安装依赖
 
@@ -32,7 +27,7 @@ uv sync
 
 ### 3. 配置环境变量
 
-在根目录创建 `.env`（或直接修改已有 `.env`），至少配置一个可用翻译供应商的 Key：
+在根目录创建 `.env`（或直接修改已有 `.env.example`），至少配置一个可用翻译供应商的 Key：
 
 ```env
 # OpenAI 方案
@@ -64,8 +59,7 @@ uv run uvicorn app.main:app --reload
 uv run uvicorn main:app --reload
 ```
 
-启动后可访问：
-- `http://127.0.0.1:8000/docs`（Swagger 文档）
+
 
 ### 5. 调用接口
 
