@@ -1,6 +1,6 @@
-# Moegal Honyaku
+![](assets/pics/moegal_honyaku.png)
 
-一个基于 `FastAPI + YOLO + MangaOCR + LLM` 的日漫图片翻译服务，支持将日文气泡文本自动翻译并回填为中文。
+一个日漫图片翻译服务，支持将日文气泡文本自动翻译并回填为中文。
 
 ## 项目效果
 
