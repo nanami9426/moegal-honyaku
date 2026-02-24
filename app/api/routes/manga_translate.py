@@ -116,7 +116,7 @@ async def translate_upload(
         })
     b64_img, file_name = img_result
     duration = round(time.time() - start, 2)
-    logger.info(f"翻译图片成功，耗时 {duration} 秒，花费 {round(price, 8)} 元，保存为{file_name}")
+    logger.info(f"翻译图片成功，耗时 {duration} 秒，保存为{file_name}")
     return JSONResponse(content={
         "status": "success",
         "duration": duration,
@@ -148,7 +148,7 @@ async def translate_web(req: ImageUrl, background_tasks: BackgroundTasks):
             })
         b64_img, file_name = img_result
         duration = round(time.time() - start, 2)
-        logger.info(f"翻译图片成功，耗时 {duration} 秒，花费 {round(price, 8)} 元，保存为{file_name}")
+        logger.info(f"翻译图片成功，耗时 {duration} 秒，保存为{file_name}")
         return JSONResponse(content={
             "status": "success",
             "duration": duration,
