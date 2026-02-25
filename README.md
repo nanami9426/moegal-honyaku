@@ -6,7 +6,7 @@
 
 示例效果：
 
-![example2](./assets/pics/example2.png)
+![example3](./assets/pics/example3.png)
 
 
 
