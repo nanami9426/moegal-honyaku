@@ -71,8 +71,11 @@ if not defined UV_BIN (
     exit /b 1
 )
 
+if not defined UV_DEFAULT_INDEX set "UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple"
+echo [INFO] uv 默认镜像源：!UV_DEFAULT_INDEX!
+
 echo [INFO] 执行 uv sync ...
-call "!UV_BIN!" sync
+call "!UV_BIN!" sync --default-index "!UV_DEFAULT_INDEX!"
 if errorlevel 1 (
     echo [ERROR] uv sync 执行失败。
     exit /b 1
