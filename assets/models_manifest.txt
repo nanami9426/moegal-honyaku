@@ -2,7 +2,7 @@
 comic-text-segmenter.pt
 manga-ocr-base/README.md
 manga-ocr-base/config.json
-manga-ocr-base/gitattributes
+manga-ocr-base/.gitattributes
 manga-ocr-base/preprocessor_config.json
 manga-ocr-base/pytorch_model.bin
 manga-ocr-base/special_tokens_map.json

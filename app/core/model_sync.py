@@ -1,25 +1,22 @@
 import os
-import sys
 from pathlib import Path, PurePosixPath
-from urllib.parse import quote, unquote, urljoin
+from urllib.parse import unquote
 
-import httpx
 from filelock import FileLock
-from tqdm import tqdm
+from huggingface_hub import hf_hub_download
 
 from app.core.logger import logger
 from app.core.paths import ASSETS_DIR, MODELS_DIR
 
-REMOTE_MODELS_URL = os.getenv(
-    "REMOTE_MODELS_URL",
-    "https://moegal.top:5552/moegal_honyaku/models/",
-).rstrip("/") + "/"
+HF_ENDPOINT = os.getenv("HF_ENDPOINT", os.getenv("HF_BASE_URL", "https://hf-mirror.com")).rstrip("/")
+MANGA_OCR_REPO_ID = os.getenv("MANGA_OCR_REPO_ID", "kha-white/manga-ocr-base")
+MANGA_OCR_MODEL_DIR = "manga-ocr-base"
+COMIC_SEGMENTER_REPO_ID = os.getenv("COMIC_SEGMENTER_REPO_ID", "ogkalu/comic-text-segmenter-yolov8m")
+COMIC_SEGMENTER_FILENAME = "comic-text-segmenter.pt"
+COMIC_SEGMENTER_RELATIVE_PATH = "comic-text-segmenter.pt"
 MODELS_MANIFEST_PATH = ASSETS_DIR / "models_manifest.txt"
 SYNC_LOCK_PATH = MODELS_DIR / ".sync.lock"
 SYNC_LOCK_TIMEOUT_SECONDS = 600
-SYNC_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=120.0, pool=10.0)
-DOWNLOAD_CHUNK_SIZE = 1024 * 256
-UNKNOWN_SIZE_PROGRESS_STEP = 8 * 1024 * 1024
 
 def _format_size(size_in_bytes: int) -> str:
     if size_in_bytes < 1024:
@@ -65,85 +62,38 @@ def _load_models_manifest() -> list[str]:
     return required_files
 
 
-def _relative_path_to_remote_url(relative_path: str) -> str:
-    if not relative_path:
-        return REMOTE_MODELS_URL
-    encoded = "/".join(quote(part) for part in PurePosixPath(relative_path).parts)
-    return urljoin(REMOTE_MODELS_URL, encoded)
+def _resolve_hf_download_target(relative_path: str) -> tuple[str, str, Path]:
+    if relative_path == COMIC_SEGMENTER_RELATIVE_PATH:
+        return COMIC_SEGMENTER_REPO_ID, COMIC_SEGMENTER_FILENAME, MODELS_DIR
+
+    manga_prefix = f"{MANGA_OCR_MODEL_DIR}/"
+    if relative_path.startswith(manga_prefix):
+        repo_relative_path = relative_path.removeprefix(manga_prefix)
+        if not repo_relative_path:
+            raise RuntimeError(f"非法模型路径: {relative_path}")
+        return MANGA_OCR_REPO_ID, repo_relative_path, MODELS_DIR / MANGA_OCR_MODEL_DIR
+
+    raise RuntimeError(f"未配置下载地址的模型文件: {relative_path}")
 
 
-def _download_single_file(client: httpx.Client, relative_path: str) -> None:
-    remote_url = _relative_path_to_remote_url(relative_path)
+def _download_single_file(relative_path: str) -> None:
+    repo_id, filename, local_dir = _resolve_hf_download_target(relative_path)
+    local_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"开始下载 {relative_path} (repo={repo_id}, endpoint={HF_ENDPOINT})")
+
+    download_kwargs = {
+        "repo_id": repo_id,
+        "filename": filename,
+        "local_dir": str(local_dir),
+        "endpoint": HF_ENDPOINT,
+    }
+
+    hf_hub_download(**download_kwargs)
+
     local_path = MODELS_DIR / Path(relative_path)
-    tmp_path = local_path.with_name(f"{local_path.name}.download")
-
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with client.stream("GET", remote_url) as response:
-            response.raise_for_status()
-            total_bytes_header = response.headers.get("content-length")
-            total_bytes: int | None = None
-            if total_bytes_header:
-                try:
-                    parsed_total = int(total_bytes_header)
-                    if parsed_total > 0:
-                        total_bytes = parsed_total
-                except ValueError:
-                    total_bytes = None
-
-            downloaded = 0
-            show_progress = sys.stdout.isatty()
-            if show_progress:
-                progress_desc = f"下载 {relative_path}"
-                with tqdm(
-                    total=total_bytes,
-                    desc=progress_desc,
-                    unit="B",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    dynamic_ncols=True,
-                    ascii=True,
-                    leave=True,
-                    file=sys.stdout,
-                ) as progress_bar:
-                    with tmp_path.open("wb") as f:
-                        for chunk in response.iter_bytes(chunk_size=DOWNLOAD_CHUNK_SIZE):
-                            if chunk:
-                                f.write(chunk)
-                                chunk_len = len(chunk)
-                                downloaded += chunk_len
-                                progress_bar.update(chunk_len)
-            else:
-                if total_bytes is not None:
-                    logger.info(f"开始下载 {relative_path}，大小 {_format_size(total_bytes)}")
-                else:
-                    logger.info(f"开始下载 {relative_path}，大小未知")
-
-                next_percent = 10
-                next_unknown_threshold = UNKNOWN_SIZE_PROGRESS_STEP
-                with tmp_path.open("wb") as f:
-                    for chunk in response.iter_bytes(chunk_size=DOWNLOAD_CHUNK_SIZE):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-
-                            if total_bytes is not None:
-                                percent = min(int(downloaded * 100 / total_bytes), 100)
-                                if percent >= next_percent or downloaded >= total_bytes:
-                                    logger.info(
-                                        f"下载进度 {relative_path}: {percent}% "
-                                        f"({_format_size(downloaded)}/{_format_size(total_bytes)})"
-                                    )
-                                    while next_percent <= percent:
-                                        next_percent += 10
-                            elif downloaded >= next_unknown_threshold:
-                                logger.info(f"下载进度 {relative_path}: {_format_size(downloaded)}")
-                                next_unknown_threshold += UNKNOWN_SIZE_PROGRESS_STEP
-        tmp_path.replace(local_path)
-    except Exception:
-        if tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
-        raise
+    if not local_path.is_file():
+        raise RuntimeError(f"下载完成但未找到模型文件: {local_path}")
+    logger.info(f"下载完成 {relative_path}，大小 {_format_size(local_path.stat().st_size)}")
 
 
 def ensure_models_ready() -> None:
@@ -170,10 +120,9 @@ def ensure_models_ready() -> None:
         for relative_dir in required_dirs:
             (MODELS_DIR / relative_dir).mkdir(parents=True, exist_ok=True)
 
-        with httpx.Client(timeout=SYNC_TIMEOUT, follow_redirects=True) as client:
-            total = len(missing_files)
-            for index, relative_path in enumerate(missing_files, start=1):
-                _download_single_file(client, relative_path)
-                logger.info(f"模型缺失文件下载 {index}/{total}: {relative_path}")
+        total = len(missing_files)
+        for index, relative_path in enumerate(missing_files, start=1):
+            _download_single_file(relative_path)
+            logger.info(f"模型缺失文件下载 {index}/{total}: {relative_path}")
 
         logger.info(f"模型缺失文件下载完成，共 {len(missing_files)} 个文件")

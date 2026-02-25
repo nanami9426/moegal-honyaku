@@ -78,8 +78,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [INFO] 启动服务：uvicorn main:app --host 0.0.0.0 --port 5000
-call "!UV_BIN!" run uvicorn main:app --host 0.0.0.0 --port 5000
+echo [INFO] 启动服务
+call "!UV_BIN!" run uvicorn main:app --host 0.0.0.0 --port 8000
 exit /b %errorlevel%
 
 
