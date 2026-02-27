@@ -46,6 +46,7 @@ DASHSCOPE_MODEL=qwen3-max
 说明：
 - 默认配置为 `openai + parallel`。
 - 运行时可通过配置接口切换供应商与翻译模式（见下文）。
+- 为了保证首次启动稳定，OCR 默认使用 CPU。若需启用 GPU，可在 `.env` 添加 `MOEGAL_USE_GPU=1`（若驱动/显卡不兼容会自动回退 CPU）。
 
 ### 4. 启动服务
 
