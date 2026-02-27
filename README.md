@@ -14,8 +14,8 @@
 
 ### 1. 环境准备
 
-- Python `3.12`
-- `uv`
+- 手动命令行方式：Python `3.12` + `uv`
+- Windows `start.cmd` 方式：无需预装 Python/uv
 
 ### 2. 安装依赖
 
@@ -52,6 +52,10 @@ DASHSCOPE_MODEL=qwen3-max
 ```bash
 uv run uvicorn app.main:app --reload
 ```
+
+Windows 用户也可直接双击或运行根目录 `start.cmd`：
+- 脚本会在项目目录内自动准备 `uv` 与 Python `3.12`。
+- 本地运行时目录默认位于 `.tools/`、`.python/`、`.venv/`。
 
 兼容入口也可用：
 
