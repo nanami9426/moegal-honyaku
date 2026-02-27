@@ -24,6 +24,7 @@ set "UV_CACHE_DIR=%ROOT_DIR%.cache\uv"
 set "UV_PYTHON_INSTALL_DIR=%ROOT_DIR%.python"
 set "UV_PROJECT_ENVIRONMENT=%ROOT_DIR%.venv"
 set "UV_PYTHON_PREFERENCE=managed"
+set "UV_PYTHON_INSTALL_BIN=0"
 
 if not defined UV_DEFAULT_INDEX set "UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple"
 echo [INFO] uv index: %UV_DEFAULT_INDEX%
@@ -32,7 +33,10 @@ call :ensure_uv_local
 if errorlevel 1 exit /b 1
 
 echo [INFO] Installing project-local Python 3.12 ...
-call "%UV_BIN%" python install 3.12
+set "UV_PYTHON_INSTALL_ARGS=3.12"
+call "%UV_BIN%" python install --help | findstr /i /c:"--no-bin" >nul
+if not errorlevel 1 set "UV_PYTHON_INSTALL_ARGS=3.12 --no-bin"
+call "%UV_BIN%" python install %UV_PYTHON_INSTALL_ARGS%
 if errorlevel 1 (
     echo [ERROR] Failed to install local Python.
     call :pause_on_error
