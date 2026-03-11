@@ -1,4 +1,5 @@
 import os
+from threading import Lock
 
 import torch
 from dotenv import load_dotenv
@@ -11,6 +12,10 @@ from app.core.paths import MODELS_DIR
 DET_MODEL_PATH = MODELS_DIR / "comic-text-segmenter.pt"
 MOCR_MODEL_PATH = MODELS_DIR / "manga-ocr-base"
 load_dotenv()
+
+_MODEL_LOCK = Lock()
+_DET_MODEL: YOLO | None = None
+_MOCR: MangaOcr | None = None
 
 
 def _is_true_env(name: str, default: bool = False) -> bool:
@@ -47,27 +52,53 @@ def _is_cuda_runtime_usable() -> tuple[bool, str]:
         return False, str(exc)
 
 
-GPU_ENABLED = _is_true_env("MOEGAL_USE_GPU", default=False)
-CUDA_USABLE, CUDA_FAIL_REASON = _is_cuda_runtime_usable() if GPU_ENABLED else (False, "")
-USE_CUDA = GPU_ENABLED and CUDA_USABLE
+def _resolve_device() -> tuple[torch.device, bool]:
+    gpu_enabled = _is_true_env("MOEGAL_USE_GPU", default=False)
+    cuda_usable, cuda_fail_reason = _is_cuda_runtime_usable() if gpu_enabled else (False, "")
+    use_cuda = gpu_enabled and cuda_usable
 
-if GPU_ENABLED and not USE_CUDA:
-    logger.warning(f"检测到 GPU 已启用但 CUDA 不可用，自动回退 CPU。原因：{CUDA_FAIL_REASON}")
+    if gpu_enabled and not use_cuda:
+        logger.warning(f"检测到 GPU 已启用但 CUDA 不可用，自动回退 CPU。原因：{cuda_fail_reason}")
 
-DEVICE = torch.device("cuda:0") if USE_CUDA else torch.device("cpu")
-DET_MODEL = YOLO(str(DET_MODEL_PATH)).to(DEVICE)
-logger.info(f"气泡检测模型加载成功，使用：{DET_MODEL.device}")
+    return torch.device("cuda:0") if use_cuda else torch.device("cpu"), use_cuda
 
-if USE_CUDA:
-    try:
-        MOCR = MangaOcr(pretrained_model_name_or_path=str(MOCR_MODEL_PATH), force_cpu=False)
-        logger.info("MangaOCR 加载成功，使用：cuda")
-    except Exception as exc:
-        if not _is_cuda_related_error(exc):
-            raise
-        logger.warning(f"MangaOCR CUDA 初始化失败，自动回退 CPU。原因：{exc}")
-        MOCR = MangaOcr(pretrained_model_name_or_path=str(MOCR_MODEL_PATH), force_cpu=True)
-        logger.info("MangaOCR 加载成功，使用：cpu")
-else:
-    MOCR = MangaOcr(pretrained_model_name_or_path=str(MOCR_MODEL_PATH), force_cpu=True)
-    logger.info("MangaOCR 加载成功，使用：cpu")
+
+def warmup_models() -> tuple[YOLO, MangaOcr]:
+    global _DET_MODEL, _MOCR
+
+    with _MODEL_LOCK:
+        if _DET_MODEL is not None and _MOCR is not None:
+            return _DET_MODEL, _MOCR
+
+        device, use_cuda = _resolve_device()
+
+        if _DET_MODEL is None:
+            _DET_MODEL = YOLO(str(DET_MODEL_PATH)).to(device)
+            logger.info(f"气泡检测模型加载成功，使用：{_DET_MODEL.device}")
+
+        if _MOCR is None:
+            if use_cuda:
+                try:
+                    _MOCR = MangaOcr(pretrained_model_name_or_path=str(MOCR_MODEL_PATH), force_cpu=False)
+                    logger.info("MangaOCR 加载成功，使用：cuda")
+                except Exception as exc:
+                    if not _is_cuda_related_error(exc):
+                        raise
+                    logger.warning(f"MangaOCR CUDA 初始化失败，自动回退 CPU。原因：{exc}")
+                    _MOCR = MangaOcr(pretrained_model_name_or_path=str(MOCR_MODEL_PATH), force_cpu=True)
+                    logger.info("MangaOCR 加载成功，使用：cpu")
+            else:
+                _MOCR = MangaOcr(pretrained_model_name_or_path=str(MOCR_MODEL_PATH), force_cpu=True)
+                logger.info("MangaOCR 加载成功，使用：cpu")
+
+        return _DET_MODEL, _MOCR
+
+
+def get_det_model() -> YOLO:
+    det_model, _ = warmup_models()
+    return det_model
+
+
+def get_mocr() -> MangaOcr:
+    _, mocr = warmup_models()
+    return mocr

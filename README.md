@@ -94,6 +94,24 @@ curl -X POST "http://127.0.0.1:8000/api/v1/translate/web" \
   }'
 ```
 
+2.1 通过 Canvas 导出的 base64 图片翻译
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/translate/web" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
+    "referer": "https://example.com",
+    "source_type": "canvas",
+    "include_res_img": false
+  }'
+```
+
+说明：
+- `image_url` 与 `image_base64` 必须且只能传一个。
+- `image_base64` 当前仅支持完整的 `data:image/png;base64,...` 格式。
+- 成功响应中的 `res_img` 仍然是不带 Data URL 前缀的纯 base64 字符串。
+
 ### 5.1 性能相关参数（可选）
 
 可通过环境变量限制 OCR 并发线程数（默认 `2`）：
@@ -101,6 +119,14 @@ curl -X POST "http://127.0.0.1:8000/api/v1/translate/web" \
 ```env
 OCR_MAX_CONCURRENCY=2
 ```
+
+`/api/v1/translate/web` 的 JSON 请求体默认最大限制为 `20 MiB`，可通过环境变量调整：
+
+```env
+TRANSLATE_WEB_MAX_BODY_BYTES=20971520
+```
+
+如果服务前面有 Nginx、Caddy 或其他反向代理，需要同步放宽对应的请求体大小限制，否则大尺寸 `canvas` PNG 可能会在到达应用前被代理直接拦截。
 
 3. 配置接口
 

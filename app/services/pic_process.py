@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw
 
 from app.core.font_conf import FontConfig
 from app.core.paths import SAVED_DIR
-from app.services.ocr import MOCR
+from app.services.ocr import get_mocr
 
 OCR_MAX_CONCURRENCY = max(1, int(os.getenv("OCR_MAX_CONCURRENCY", "2")))
 INPAINT_RADIUS = 2
@@ -60,13 +60,14 @@ async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
         return [], image_cv
 
     height, width = image_cv.shape[:2]
+    mocr = get_mocr()
     semaphore = asyncio.Semaphore(min(OCR_MAX_CONCURRENCY, len(bboxes)))
 
     async def ocr_and_mask(bbox):
         x1, y1, x2, y2 = _sanitize_bbox(bbox, width, height)
         cropped_image = image_pil.crop((x1, y1, x2, y2))
         async with semaphore:
-            text = await asyncio.to_thread(MOCR, cropped_image)
+            text = await asyncio.to_thread(mocr, cropped_image)
         local_mask = _build_text_mask(image_cv[y1:y2, x1:x2])
         return text, (x1, y1, x2, y2), local_mask
 
