@@ -3,7 +3,7 @@ import base64
 import json
 import random
 import time
-from typing import Literal
+from typing import Literal, cast
 
 import cv2
 import httpx
@@ -25,6 +25,8 @@ manga_translate_router = APIRouter()
 
 DOWNLOAD_RETRY_COUNT = 2
 DOWNLOAD_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
+TEXT_DIRECTION_OPTIONS = ("horizontal", "vertical")
+TextDirection = Literal["horizontal", "vertical"]
 
 
 def _decode_image(file_bytes: bytes):
@@ -61,10 +63,23 @@ async def _download_image_bytes(image_url: str, referer: str) -> bytes:
     raise RuntimeError(f"图片下载失败：{last_error}")
 
 
+def _normalize_text_direction(value) -> TextDirection:
+    if value is None:
+        return "horizontal"
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized:
+            return "horizontal"
+        if normalized in TEXT_DIRECTION_OPTIONS:
+            return cast(TextDirection, normalized)
+    raise ValueError(f"text_direction 必须是 {TEXT_DIRECTION_OPTIONS}")
+
+
 async def _translate_image_bytes(
     file_bytes: bytes,
     include_res_img: bool,
     background_tasks: BackgroundTasks,
+    text_direction: TextDirection = "horizontal",
 ):
     from app.services.ocr import get_det_model
     from app.services.pic_process import draw_text_on_boxes, get_text_masked_pic, save_img
@@ -85,7 +100,7 @@ async def _translate_image_bytes(
         api_type=custom_conf.translate_api_type,
         translate_mode=custom_conf.translate_mode,
     )
-    img_res = draw_text_on_boxes(inpaint, bboxes, cn_text)
+    img_res = draw_text_on_boxes(inpaint, bboxes, cn_text, text_direction=text_direction)
     ok, buffer = cv2.imencode(".png", img_res)
     if not ok:
         raise RuntimeError("结果图片编码失败")
@@ -123,20 +138,25 @@ async def translate_upload(
     background_tasks: BackgroundTasks,
     img: UploadFile = File(...),
     include_res_img: bool = True,
+    text_direction: str = "horizontal",
 ):
     start = time.time()
     try:
+        text_direction_value = _normalize_text_direction(text_direction)
         file_bytes = await img.read()
         all_text, cn_text, price, img_result = await _translate_image_bytes(
             file_bytes=file_bytes,
             include_res_img=include_res_img,
             background_tasks=background_tasks,
+            text_direction=text_direction_value,
         )
         if all_text is None:
             return JSONResponse(content={
                 "status": "error",
                 "info": "未检测出文字",
             })
+    except ValueError as exc:
+        return _error_response(str(exc), 400)
     except Exception as e:
         logger.error(f"翻译失败：{e}")
         return JSONResponse(content={
@@ -162,6 +182,7 @@ class TranslateWebRequest(BaseModel):
     referer: str
     source_type: Literal["img", "canvas"] | None = None
     include_res_img: bool = True
+    text_direction: TextDirection = "horizontal"
 
     @field_validator("image_url", "image_base64", mode="before")
     @classmethod
@@ -182,6 +203,11 @@ class TranslateWebRequest(BaseModel):
             stripped = value.strip()
             return stripped or None
         return value
+
+    @field_validator("text_direction", mode="before")
+    @classmethod
+    def _normalize_text_direction_field(cls, value):
+        return _normalize_text_direction(value)
 
     @model_validator(mode="after")
     def validate_image_source(self):
@@ -216,6 +242,7 @@ async def translate_web(request: Request, background_tasks: BackgroundTasks):
             file_bytes=file_bytes,
             include_res_img=req.include_res_img,
             background_tasks=background_tasks,
+            text_direction=req.text_direction,
         )
         if all_text is None:
             return JSONResponse(content={

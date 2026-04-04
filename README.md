@@ -82,6 +82,13 @@ curl -X POST "http://127.0.0.1:8000/api/v1/translate/upload?include_res_img=fals
   -F "img=@./assets/pics/example1.png"
 ```
 
+如需竖排回填，可传 `text_direction=vertical`：
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/translate/upload?text_direction=vertical" \
+  -F "img=@./assets/pics/example1.png"
+```
+
 2. 通过图片 URL 翻译
 
 ```bash
@@ -90,7 +97,8 @@ curl -X POST "http://127.0.0.1:8000/api/v1/translate/web" \
   -d '{
     "image_url": "https://example.com/xxx.png",
     "referer": "https://example.com",
-    "include_res_img": false
+    "include_res_img": false,
+    "text_direction": "vertical"
   }'
 ```
 
@@ -103,13 +111,15 @@ curl -X POST "http://127.0.0.1:8000/api/v1/translate/web" \
     "image_base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
     "referer": "https://example.com",
     "source_type": "canvas",
-    "include_res_img": false
+    "include_res_img": false,
+    "text_direction": "vertical"
   }'
 ```
 
 说明：
 - `image_url` 与 `image_base64` 必须且只能传一个。
 - `image_base64` 当前仅支持完整的 `data:image/png;base64,...` 格式。
+- `text_direction` 可选值为 `horizontal`（默认）和 `vertical`。
 - 成功响应中的 `res_img` 仍然是不带 Data URL 前缀的纯 base64 字符串。
 
 ### 5.1 性能相关参数（可选）
