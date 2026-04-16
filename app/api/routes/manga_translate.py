@@ -15,6 +15,7 @@ from pydantic import BaseModel, ValidationError, field_validator, model_validato
 
 from app.core.custom_conf import custom_conf
 from app.core.logger import logger
+from app.services.translate_api import MissingTranslateProviderConfigError
 from app.services.web_image_input import (
     TranslateWebInputError,
     decode_image_base64_data_url,
@@ -157,6 +158,8 @@ async def translate_upload(
             })
     except ValueError as exc:
         return _error_response(str(exc), 400)
+    except MissingTranslateProviderConfigError as exc:
+        return _error_response(str(exc), 400)
     except Exception as e:
         logger.error(f"翻译失败：{e}")
         return JSONResponse(content={
@@ -266,6 +269,8 @@ async def translate_web(request: Request, background_tasks: BackgroundTasks):
         return _error_response(_validation_error_message(exc), 400)
     except TranslateWebInputError as exc:
         return _error_response(exc.message, exc.status_code)
+    except MissingTranslateProviderConfigError as exc:
+        return _error_response(str(exc), 400)
     except Exception as e:
         logger.error(f"翻译失败：{e}")
         return _error_response(str(e), 500)

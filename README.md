@@ -27,14 +27,14 @@ uv sync
 
 ### 3. 配置环境变量
 
-在根目录创建 `.env`（或直接修改已有 `.env.example`），至少配置一个可用翻译供应商的 Key：
+在根目录创建 `.env`（或直接修改已有 `.env.example`）。翻译接口相关配置可以先留空，服务仍可正常启动；实际翻译时，插件 popup 和翻译按钮会提示补充配置。
 
 ```env
-# OpenAI 方案
-OPENAI_API_KEY=your_openai_api_key
+# 自定义接口方案（OpenAI 兼容）
+CUSTOM_API_KEY=your_custom_api_key
 # 可选，不填则使用代码默认值
-OPENAI_BASE_URL=https://api.openai-proxy.org/v1
-OPENAI_MODEL=gpt-5-mini
+CUSTOM_BASE_URL=https://api.openai-proxy.org/v1
+CUSTOM_MODEL=gpt-5-mini
 
 # DashScope 方案
 DASHSCOPE_API_KEY=your_dashscope_api_key
@@ -44,8 +44,9 @@ DASHSCOPE_MODEL=qwen3-max
 ```
 
 说明：
-- 默认配置为 `openai + parallel`。
+- 默认配置为 `custom + parallel`。
 - 运行时可通过配置接口切换供应商与翻译模式（见下文）。
+- 若当前供应商未配置 Key，服务不会启动失败，但在 popup 配置页和实际翻译时会提示需要填写对应 `.env`。
 - 为了保证首次启动稳定，OCR 默认使用 CPU。若需启用 GPU，可在 `.env` 添加 `MOEGAL_USE_GPU=1`（若驱动/显卡不兼容会自动回退 CPU）。
 
 ### 4. 启动服务
@@ -141,7 +142,7 @@ TRANSLATE_WEB_MAX_BODY_BYTES=20971520
 3. 配置接口
 
 ```bash
-# 初始化为默认配置（openai + parallel）
+# 初始化为默认配置（custom + parallel）
 curl -X POST "http://127.0.0.1:8000/conf/init"
 
 # 查询当前配置
@@ -149,6 +150,11 @@ curl "http://127.0.0.1:8000/conf/query"
 
 # 查看可选项
 curl "http://127.0.0.1:8000/conf/options"
+
+# 更新配置示例：切换到 custom
+curl -X POST "http://127.0.0.1:8000/conf/update" \
+  -H "Content-Type: application/json" \
+  -d '{"attr":"translate_api_type","v":"custom"}'
 
 # 更新配置示例：切换到 dashscope
 curl -X POST "http://127.0.0.1:8000/conf/update" \
@@ -159,6 +165,25 @@ curl -X POST "http://127.0.0.1:8000/conf/update" \
 curl -X POST "http://127.0.0.1:8000/conf/update" \
   -H "Content-Type: application/json" \
   -d '{"attr":"translate_mode","v":"structured"}'
+```
+
+`/conf/query`、`/conf/init`、`/conf/update` 的返回中会额外带上 `provider_status`，用于提示当前供应商是否已配置。例如：
+
+```json
+{
+  "translate_api_type": "custom",
+  "translate_mode": "parallel",
+  "provider_status": {
+    "custom": {
+      "configured": false,
+      "message": "当前自定义翻译接口未配置，请在后端 .env 中填写 CUSTOM_API_KEY"
+    },
+    "dashscope": {
+      "configured": true,
+      "message": ""
+    }
+  }
+}
 ```
 
 ### 6. 输出文件

@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+from functools import lru_cache
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -17,27 +18,52 @@ TRANSLATE_STRUCTURED_SYSTEM_PROMPT = (
 )
 
 
-# DashScope OpenAI 兼容接口配置，可通过 .env 覆盖默认值。
-DASHSCOPE_BASE_URL = os.getenv(
-    "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
-)
-DASHSCOPE_MODEL = os.getenv("DASHSCOPE_MODEL", "qwen3-max")
-DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
+class MissingTranslateProviderConfigError(RuntimeError):
+    pass
 
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai-proxy.org/v1")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# 复用单个异步客户端，避免重复建立连接。
-ALI_CLIENT = AsyncOpenAI(
-    api_key=DASHSCOPE_API_KEY,
-    base_url=DASHSCOPE_BASE_URL,
-)
+DASHSCOPE_BASE_URL_DEFAULT = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+DASHSCOPE_MODEL_DEFAULT = "qwen3-max"
+CUSTOM_BASE_URL_DEFAULT = "https://api.openai-proxy.org/v1"
+CUSTOM_MODEL_DEFAULT = "gpt-5-mini"
 
-OPENAI_CLIENT = AsyncOpenAI(
-    api_key=OPENAI_API_KEY,
-    base_url=OPENAI_BASE_URL,
-)
+MISSING_PROVIDER_MESSAGES = {
+    "dashscope": "当前 DashScope 翻译接口未配置，请在后端 .env 中填写 DASHSCOPE_API_KEY",
+    "custom": "当前自定义翻译接口未配置，请在后端 .env 中填写 CUSTOM_API_KEY",
+}
+
+
+def _read_env(name: str, default: str = "") -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip()
+    if not normalized:
+        return default
+    return normalized
+
+
+def _provider_status_item(provider: str, env_name: str):
+    configured = bool(_read_env(env_name))
+    return {
+        "configured": configured,
+        "message": "" if configured else MISSING_PROVIDER_MESSAGES[provider],
+    }
+
+
+def get_provider_status():
+    return {
+        "dashscope": _provider_status_item("dashscope", "DASHSCOPE_API_KEY"),
+        "custom": _provider_status_item("custom", "CUSTOM_API_KEY"),
+    }
+
+
+@lru_cache(maxsize=None)
+def _build_client(api_key: str, base_url: str):
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+    )
 
 
 def _normalize_content(content) -> str:
@@ -59,13 +85,29 @@ def _normalize_content(content) -> str:
 
 def _provider_options(api_type: str):
     if api_type == "dashscope":
-        if not DASHSCOPE_API_KEY:
-            raise RuntimeError("DASHSCOPE_API_KEY 未配置")
-        return ALI_CLIENT, DASHSCOPE_MODEL, {"extra_body": {"enable_thinking": False}}
-    if api_type == "openai":
-        if not OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY 未配置")
-        return OPENAI_CLIENT, OPENAI_MODEL, {}
+        api_key = _read_env("DASHSCOPE_API_KEY")
+        if not api_key:
+            raise MissingTranslateProviderConfigError(MISSING_PROVIDER_MESSAGES["dashscope"])
+        return (
+            _build_client(
+                api_key=api_key,
+                base_url=_read_env("DASHSCOPE_BASE_URL", DASHSCOPE_BASE_URL_DEFAULT),
+            ),
+            _read_env("DASHSCOPE_MODEL", DASHSCOPE_MODEL_DEFAULT),
+            {"extra_body": {"enable_thinking": False}},
+        )
+    if api_type == "custom":
+        api_key = _read_env("CUSTOM_API_KEY")
+        if not api_key:
+            raise MissingTranslateProviderConfigError(MISSING_PROVIDER_MESSAGES["custom"])
+        return (
+            _build_client(
+                api_key=api_key,
+                base_url=_read_env("CUSTOM_BASE_URL", CUSTOM_BASE_URL_DEFAULT),
+            ),
+            _read_env("CUSTOM_MODEL", CUSTOM_MODEL_DEFAULT),
+            {},
+        )
     raise RuntimeError(f"不支持的 translate_api_type: {api_type}")
 
 
@@ -157,7 +199,7 @@ async def _translate_structured(all_text, api_type: str):
     return _parse_structured_result(raw, len(all_text)), 0.0
 
 
-async def translate_req(all_text, api_type: str = "dashscope", translate_mode: str = "parallel"):
+async def translate_req(all_text, api_type: str = "custom", translate_mode: str = "parallel"):
     if translate_mode == "parallel":
         return await _translate_parallel(all_text, api_type)
     if translate_mode == "structured":
