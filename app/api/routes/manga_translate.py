@@ -37,7 +37,8 @@ def _decode_image(file_bytes: bytes):
     img_bgr_cv = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
     if img_bgr_cv is None:
         raise TranslateWebInputError(400, "图片解码失败，请确认输入为有效图片")
-    return img_bgr_cv, Image.fromarray(img_bgr_cv)
+    img_rgb = cv2.cvtColor(img_bgr_cv, cv2.COLOR_BGR2RGB)
+    return img_bgr_cv, Image.fromarray(img_rgb)
 
 
 async def _download_image_bytes(image_url: str, referer: str) -> bytes:

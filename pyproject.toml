@@ -56,7 +56,6 @@ dependencies = [
     "pillow==11.2.1",
     "propcache==0.3.2",
     "psutil==7.0.0",
-    "py-cpuinfo==9.0.0",
     "pydantic==2.11.7",
     "pydantic_core==2.33.2",
     "Pygments==2.19.1",
@@ -89,8 +88,6 @@ dependencies = [
     "typing-inspection==0.4.1",
     "typing_extensions==4.14.0",
     "tzdata==2025.2",
-    "ultralytics==8.3.157",
-    "ultralytics-thop==2.0.14",
     "unidic-lite==1.0.8",
     "urllib3==2.5.0",
     "uvicorn==0.34.3",
@@ -103,6 +100,11 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[[tool.uv.index]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
