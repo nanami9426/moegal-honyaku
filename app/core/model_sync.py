@@ -8,12 +8,16 @@ from huggingface_hub import hf_hub_download
 from app.core.logger import logger
 from app.core.paths import ASSETS_DIR, MODELS_DIR
 
+OFFICIAL_HF_ENDPOINT = "https://huggingface.co"
 HF_ENDPOINT = os.getenv("HF_ENDPOINT", os.getenv("HF_BASE_URL", "https://hf-mirror.com")).rstrip("/")
+HF_FALLBACK_ENDPOINT = os.getenv("HF_FALLBACK_ENDPOINT", OFFICIAL_HF_ENDPOINT).rstrip("/")
 MANGA_OCR_REPO_ID = os.getenv("MANGA_OCR_REPO_ID", "kha-white/manga-ocr-base")
 MANGA_OCR_MODEL_DIR = "manga-ocr-base"
-COMIC_SEGMENTER_REPO_ID = os.getenv("COMIC_SEGMENTER_REPO_ID", "ogkalu/comic-text-segmenter-yolov8m")
-COMIC_SEGMENTER_FILENAME = "comic-text-segmenter.pt"
-COMIC_SEGMENTER_RELATIVE_PATH = "comic-text-segmenter.pt"
+TEXT_BUBBLE_DETECTOR_REPO_ID = os.getenv(
+    "TEXT_BUBBLE_DETECTOR_REPO_ID",
+    "ogkalu/comic-text-and-bubble-detector",
+)
+TEXT_BUBBLE_DETECTOR_MODEL_DIR = "comic-text-and-bubble-detector"
 MODELS_MANIFEST_PATH = ASSETS_DIR / "models_manifest.txt"
 SYNC_LOCK_PATH = MODELS_DIR / ".sync.lock"
 SYNC_LOCK_TIMEOUT_SECONDS = 600
@@ -63,8 +67,16 @@ def _load_models_manifest() -> list[str]:
 
 
 def _resolve_hf_download_target(relative_path: str) -> tuple[str, str, Path]:
-    if relative_path == COMIC_SEGMENTER_RELATIVE_PATH:
-        return COMIC_SEGMENTER_REPO_ID, COMIC_SEGMENTER_FILENAME, MODELS_DIR
+    detector_prefix = f"{TEXT_BUBBLE_DETECTOR_MODEL_DIR}/"
+    if relative_path.startswith(detector_prefix):
+        repo_relative_path = relative_path.removeprefix(detector_prefix)
+        if not repo_relative_path:
+            raise RuntimeError(f"1145141919810: {relative_path}")
+        return (
+            TEXT_BUBBLE_DETECTOR_REPO_ID,
+            repo_relative_path,
+            MODELS_DIR / TEXT_BUBBLE_DETECTOR_MODEL_DIR,
+        )
 
     manga_prefix = f"{MANGA_OCR_MODEL_DIR}/"
     if relative_path.startswith(manga_prefix):
@@ -88,7 +100,16 @@ def _download_single_file(relative_path: str) -> None:
         "endpoint": HF_ENDPOINT,
     }
 
-    hf_hub_download(**download_kwargs)
+    try:
+        hf_hub_download(**download_kwargs)
+    except Exception as exc:
+        if not HF_FALLBACK_ENDPOINT or HF_FALLBACK_ENDPOINT == HF_ENDPOINT:
+            raise
+        logger.warning(
+            f"Download failed from {HF_ENDPOINT}, retrying with {HF_FALLBACK_ENDPOINT}: {exc}"
+        )
+        download_kwargs["endpoint"] = HF_FALLBACK_ENDPOINT
+        hf_hub_download(**download_kwargs)
 
     local_path = MODELS_DIR / Path(relative_path)
     if not local_path.is_file():

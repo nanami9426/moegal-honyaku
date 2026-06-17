@@ -1,5 +1,7 @@
 # Relative paths under assets/models/
-comic-text-segmenter.pt
+comic-text-and-bubble-detector/config.json
+comic-text-and-bubble-detector/model.safetensors
+comic-text-and-bubble-detector/preprocessor_config.json
 manga-ocr-base/README.md
 manga-ocr-base/config.json
 manga-ocr-base/.gitattributes

@@ -1,21 +1,38 @@
-import os
-from threading import Lock
+from __future__ import annotations
 
+import os
+from dataclasses import dataclass
+from threading import Lock
+from typing import Any
+
+import cv2
+import numpy as np
 import torch
 from dotenv import load_dotenv
 from manga_ocr import MangaOcr
-from ultralytics import YOLO
+from PIL import Image
+from transformers import AutoImageProcessor, AutoModelForObjectDetection
 
 from app.core.logger import logger
 from app.core.paths import MODELS_DIR
 
-DET_MODEL_PATH = MODELS_DIR / "comic-text-segmenter.pt"
+TEXT_BUBBLE_MODEL_PATH = MODELS_DIR / "comic-text-and-bubble-detector"
+TEXT_BUBBLE_LABEL = "text_bubble"
+TEXT_BUBBLE_CONFIDENCE = 0.8
 MOCR_MODEL_PATH = MODELS_DIR / "manga-ocr-base"
 load_dotenv()
 
 _MODEL_LOCK = Lock()
-_DET_MODEL: YOLO | None = None
+_DET_MODEL: TextBubbleDetector | None = None
 _MOCR: MangaOcr | None = None
+
+
+@dataclass(frozen=True)
+class TextBubbleDetector:
+    processor: Any
+    model: torch.nn.Module
+    device: torch.device
+    label_id: int
 
 
 def _is_true_env(name: str, default: bool = False) -> bool:
@@ -63,7 +80,20 @@ def _resolve_device() -> tuple[torch.device, bool]:
     return torch.device("cuda:0") if use_cuda else torch.device("cpu"), use_cuda
 
 
-def warmup_models() -> tuple[YOLO, MangaOcr]:
+def _resolve_label_id(model: torch.nn.Module) -> int:
+    label2id = getattr(model.config, "label2id", {}) or {}
+    if TEXT_BUBBLE_LABEL in label2id:
+        return int(label2id[TEXT_BUBBLE_LABEL])
+
+    id2label = getattr(model.config, "id2label", {}) or {}
+    for raw_id, label in id2label.items():
+        if label == TEXT_BUBBLE_LABEL:
+            return int(raw_id)
+
+    raise RuntimeError(f"Detector label not found: {TEXT_BUBBLE_LABEL}")
+
+
+def warmup_models() -> tuple[TextBubbleDetector, MangaOcr]:
     global _DET_MODEL, _MOCR
 
     with _MODEL_LOCK:
@@ -73,8 +103,23 @@ def warmup_models() -> tuple[YOLO, MangaOcr]:
         device, use_cuda = _resolve_device()
 
         if _DET_MODEL is None:
-            _DET_MODEL = YOLO(str(DET_MODEL_PATH)).to(device)
-            logger.info(f"气泡检测模型加载成功，使用：{_DET_MODEL.device}")
+            processor = AutoImageProcessor.from_pretrained(
+                str(TEXT_BUBBLE_MODEL_PATH),
+                local_files_only=True,
+                use_fast=False,
+            )
+            model = AutoModelForObjectDetection.from_pretrained(
+                str(TEXT_BUBBLE_MODEL_PATH),
+                local_files_only=True,
+            ).to(device)
+            model.eval()
+            _DET_MODEL = TextBubbleDetector(
+                processor=processor,
+                model=model,
+                device=device,
+                label_id=_resolve_label_id(model),
+            )
+            logger.info(f"Text bubble detector loaded on {_DET_MODEL.device}")
 
         if _MOCR is None:
             if use_cuda:
@@ -94,9 +139,35 @@ def warmup_models() -> tuple[YOLO, MangaOcr]:
         return _DET_MODEL, _MOCR
 
 
-def get_det_model() -> YOLO:
+def get_det_model() -> TextBubbleDetector:
     det_model, _ = warmup_models()
     return det_model
+
+
+def detect_text_bubbles(image_cv: np.ndarray) -> np.ndarray:
+    detector = get_det_model()
+    image_rgb = cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB)
+    image = Image.fromarray(image_rgb)
+    inputs = detector.processor(images=image, return_tensors="pt")
+    inputs = {
+        key: value.to(detector.device) if hasattr(value, "to") else value
+        for key, value in inputs.items()
+    }
+
+    with torch.inference_mode():
+        outputs = detector.model(**inputs)
+
+    target_sizes = torch.tensor([image.size[::-1]], device=detector.device)
+    result = detector.processor.post_process_object_detection(
+        outputs,
+        threshold=TEXT_BUBBLE_CONFIDENCE,
+        target_sizes=target_sizes,
+    )[0]
+
+    labels = result["labels"].detach().cpu().numpy()
+    boxes = result["boxes"].detach().cpu().numpy()
+    text_bubble_boxes = boxes[labels == detector.label_id]
+    return text_bubble_boxes.astype(np.float32, copy=False)
 
 
 def get_mocr() -> MangaOcr:

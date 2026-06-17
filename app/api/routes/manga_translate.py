@@ -82,15 +82,13 @@ async def _translate_image_bytes(
     background_tasks: BackgroundTasks,
     text_direction: TextDirection = "horizontal",
 ):
-    from app.services.ocr import get_det_model
+    from app.services.ocr import detect_text_bubbles
     from app.services.pic_process import draw_text_on_boxes, get_text_masked_pic, save_img
     from app.services.translate_api import translate_req
 
     price = -0.0001
     img_bgr_cv, img_pil = _decode_image(file_bytes)
-    det_model = get_det_model()
-    res = det_model(img_bgr_cv, verbose=False)
-    bboxes = res[0].boxes.xyxy.cpu().numpy()
+    bboxes = detect_text_bubbles(img_bgr_cv)
     all_text, inpaint = await get_text_masked_pic(img_pil, img_bgr_cv, bboxes, True)
     if len(all_text) == 0:
         logger.warning("未检测出文字")
