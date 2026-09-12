@@ -51,6 +51,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem 首次启动创建配置文件，保留用户已有配置。
+if not exist ".env" (
+    copy ".env.example" ".env" >nul
+    if errorlevel 1 (
+        echo [ERROR] Cannot create .env.
+        call :pause_on_error
+        exit /b 1
+    )
+    echo [INFO] Created .env. Configure your translation API key before translating.
+)
+
 echo [INFO] Starting service ...
 call "%UV_BIN%" run --python 3.12 uvicorn main:app --host 0.0.0.0 --port 8000
 set "EXIT_CODE=%ERRORLEVEL%"

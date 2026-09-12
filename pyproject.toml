@@ -80,8 +80,11 @@ dependencies = [
     "sympy==1.14.0",
     "termcolor==3.1.0",
     "tokenizers==0.21.1",
-    "torch==2.7.1+cu126",
-    "torchvision==0.22.1+cu126",
+    # macOS 使用原生构建，Windows/Linux 继续使用 CUDA 构建。
+    "torch==2.7.1; sys_platform == 'darwin'",
+    "torch==2.7.1+cu126; sys_platform != 'darwin'",
+    "torchvision==0.22.1; sys_platform == 'darwin'",
+    "torchvision==0.22.1+cu126; sys_platform != 'darwin'",
     "tqdm==4.67.1",
     "transformers==4.52.4",
     "typer==0.16.0",
@@ -94,7 +97,7 @@ dependencies = [
     "watchfiles==1.1.0",
     "websockets==15.0.1",
     "wheel==0.45.1",
-    "win32_setctime==1.2.0",
+    "win32_setctime==1.2.0; sys_platform == 'win32'",
     "yarl==1.20.1",
 ]
 
@@ -112,5 +115,5 @@ url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu126" }]
-torchvision = [{ index = "pytorch-cu126" }]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform != 'darwin'" }]
+torchvision = [{ index = "pytorch-cu126", marker = "sys_platform != 'darwin'" }]

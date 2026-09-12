@@ -15,7 +15,9 @@
 ### 1. 环境准备
 
 - 手动命令行方式：Python `3.12` + `uv`
-- Windows `start.cmd` 方式：无需预装 Python/uv
+- Windows（x64）`start.cmd` / macOS（Apple Silicon，macOS 13+）`start.command`：无需预装 Python/uv。
+- Mac 使用原生 PyTorch，Windows/Linux 保留 CUDA 12.6 构建；默认都使用 CPU，Windows 有兼容的 NVIDIA 显卡时可启用 GPU。
+- 当前不支持 Intel Mac：锁定的 PyTorch 2.7.1 没有对应安装包。Mac 暂未接入 MPS 加速，保持 `MOEGAL_USE_GPU=0`。
 
 ### 2. 安装依赖
 
@@ -27,7 +29,14 @@ uv sync
 
 ### 3. 配置环境变量
 
-在根目录创建 `.env`（或直接修改已有 `.env.example`）。翻译接口相关配置可以先留空，服务仍可正常启动；实际翻译时，插件 popup 和翻译按钮会提示补充配置。
+在根目录复制 `.env.example` 为 `.env`，然后编辑 `.env`（一键启动脚本会在文件不存在时自动创建，不覆盖已有配置）。
+
+```bash
+# macOS / Linux；已有 .env 时不要覆盖
+cp -n .env.example .env
+```
+
+翻译接口相关配置可以先留空，服务仍可正常启动；实际翻译时，插件 popup 和翻译按钮会提示补充配置。
 
 ```env
 # 自定义接口方案（OpenAI 兼容）
@@ -55,9 +64,16 @@ DASHSCOPE_MODEL=qwen3-max
 uv run uvicorn app.main:app --reload
 ```
 
-Windows 用户也可直接双击或运行根目录 `start.cmd`：
-- 脚本会在项目目录内自动准备 `uv` 与 Python `3.12`。
-- 本地运行时目录默认位于 `.tools/`、`.python/`、`.venv/`。
+**一键启动：**
+
+- Windows：双击根目录 `start.cmd`。
+- Mac（M 系列芯片）：双击根目录 `start.command`，或在终端运行 `./start.command`。
+- 如果下载 ZIP 后 Mac 脚本没有执行权限，在项目目录执行 `chmod +x start.command` 后重试；也可运行 `bash start.command`。
+- 两个脚本都会在项目目录内自动准备 `uv`、Python `3.12` 和依赖，并在缺少 `.env` 时从示例创建。
+- 本地运行时目录为 `.tools/`、`.python/`、`.venv/`，依赖缓存位于 `.cache/uv/`。
+- 首次运行需要联网下载工具、依赖与 OCR 模型。模型保存在 `assets/models/`，后续启动复用已有文件。
+- 服务就绪后访问 `http://127.0.0.1:8000/docs` 测试接口，保持终端开启，按 `Ctrl+C` 停止服务。
+- M 系列 Mac 请使用原生终端运行，不要启用 Rosetta 模式。
 
 兼容入口也可用：
 
