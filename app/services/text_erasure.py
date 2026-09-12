@@ -26,21 +26,140 @@ def _uniform_background(
     else:
         # 初步找到文字后，笔画周围的干净像素比矩形框角更能代表气泡底色。
         nearby = cv2.dilate(text_mask, np.ones((5, 5), np.uint8)) > 0
-        rings = (nearby & (text_mask == 0) & core,)
+        interior = cv2.erode(core.astype(np.uint8), np.ones((7, 7), np.uint8),
+                             borderType=cv2.BORDER_CONSTANT, borderValue=0) > 0
+        rings = (nearby & (text_mask == 0) & interior,)
     for ring in rings:
         if np.count_nonzero(ring) < 8:
             continue
         color = _dominant_color(crop[ring])
         color_lab = cv2.cvtColor(color.reshape(1, 1, 3), cv2.COLOR_BGR2LAB)[0, 0]
         distance = np.linalg.norm(lab - color_lab, axis=2)
+        check = core
+        if text_mask is not None:
+            # 排除少量连到裁剪边缘的深色轮廓，避免气泡边框污染取色。
+            # 大片色块和浅灰纹理仍参与检查，不能把半透明或复杂背景误判为纯色。
+            high = (distance > 64) & (text_mask == 0)
+            count, labels, stats, _ = cv2.connectedComponentsWithStats(high.astype(np.uint8), connectivity=8)
+            excluded = np.zeros(core.shape, dtype=np.uint8)
+            height, width = core.shape
+            max_border_area = np.count_nonzero(core) * 0.1
+            for idx in range(1, count):
+                x, y, w, h, _ = stats[idx]
+                if x != 0 and y != 0 and x + w != width and y + h != height:
+                    continue
+                component = labels[y:y + h, x:x + w] == idx
+                if np.count_nonzero(component & core[y:y + h, x:x + w]) <= max_border_area:
+                    excluded[y:y + h, x:x + w][component] = 1
+            # 多条细线也可能累计成大片纹理，不能逐条忽略后将背景刷平。
+            if np.count_nonzero((excluded > 0) & core) > max_border_area:
+                excluded[:] = 0
+            # 一并避开轮廓外侧一像素的抗锯齿灰边。
+            excluded = cv2.dilate(excluded, np.ones((3, 3), np.uint8)) > 0
+            ring = ring & ~excluded
+            check = core & (text_mask == 0) & ~excluded
+            if np.count_nonzero(ring) < 8 or np.count_nonzero(check) < 8:
+                continue
         # 采样圈和框内都要有足够一致的背景；渐变、半透明和网点不能直接刷成纯色。
+        # 找到掩码后只检查剩余背景，密集文字本身不应降低背景一致性。
         percentile = 99 if text_mask is not None else 90
-        if np.percentile(distance[ring], percentile) <= 8 and np.mean(distance[core] <= 8) >= 0.5:
+        required_ratio = 0.9 if text_mask is not None else 0.5
+        # 少量抗锯齿噪点可容忍，但大部分背景必须更接近底色，以保留浅色渐变。
+        if text_mask is not None and np.percentile(distance[ring], 95) > 3:
+            continue
+        if np.percentile(distance[ring], percentile) <= 8 and np.mean(distance[check] <= 8) >= required_ratio:
             return np.median(crop[ring & (distance <= 8)], axis=0).astype(np.uint8)
     return None
 
 
+def _outlined_text_mask(crop: np.ndarray, core: np.ndarray) -> np.ndarray | None:
+    """识别白描边的深色字；证据不足时交回普通文字处理。"""
+    if min(crop.shape[:2]) < 7 or not np.any(core):
+        return None
+    lightness = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)[:, :, 0]
+    size = 2 * max(2, min(10, min(crop.shape[:2]) // 8)) + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+    # 字芯与亮描边分别判断，避免两者通过背景线连到裁剪边缘后整字被保护。
+    dark = cv2.morphologyEx(lightness, cv2.MORPH_BLACKHAT, kernel)
+    threshold, _ = cv2.threshold(dark[core], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    strong = dark > max(16, threshold)
+    if np.count_nonzero(strong & core) < 8:
+        return None
+    # 黑帽也会响应白描边旁的灰底，再从高响应像素中分出较暗的字芯。
+    samples = lightness[strong & core]
+    threshold, _ = cv2.threshold(samples, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    strong &= lightness <= max(threshold, np.percentile(samples, 10))
+    near_white = crop.min(axis=2) >= 238
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(strong.astype(np.uint8), connectivity=8)
+    mask = np.zeros(core.shape, dtype=np.uint8)
+    height, width = core.shape
+    eligible = np.zeros(core.shape, dtype=np.uint8)
+    for idx in range(1, count):
+        x, y, w, h, _ = stats[idx]
+        if x == 0 or y == 0 or x + w == width or y + h == height:
+            continue
+        component = labels[y:y + h, x:x + w] == idx
+        # 保留小笔画和单像素标点，只排除触边结构及文字框外的孤立细节。
+        if np.any(component & core[y:y + h, x:x + w]):
+            eligible[y:y + h, x:x + w][component] = 1
+    if not np.any(eligible):
+        return None
+    near_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    ring_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    outer_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    # 密集小字的内部碎笔画未必各自带白边，先把相距很近的字芯分组判断。
+    # 膨胀只用于分组，连接笔画的空隙不会直接加入文字掩码。
+    groups = cv2.dilate(eligible, near_kernel)
+    group_count, group_labels, group_stats, _ = cv2.connectedComponentsWithStats(groups, connectivity=8)
+    text_neighborhood = cv2.dilate(strong.astype(np.uint8), ring_kernel) > 0
+    outlined_components = 0
+    for idx in range(1, group_count):
+        x, y, w, h, _ = group_stats[idx]
+        # 只在连通域附近采样，避免每个字都对整张裁剪图重复膨胀。
+        left, top = max(0, x - 7), max(0, y - 7)
+        right, bottom = min(width, x + w + 7), min(height, y + h + 7)
+        component = ((group_labels[top:bottom, left:right] == idx)
+                     & (eligible[top:bottom, left:right] > 0)).astype(np.uint8)
+        inner = cv2.dilate(component, near_kernel) > 0
+        near = cv2.dilate(component, ring_kernel) > 0
+        outer = cv2.dilate(component, outer_kernel) > 0
+        ring = near & ~inner
+        # 外圈还要避开邻字，不能把密集黑字当成白描边外侧的有色背景。
+        surroundings = outer & ~near & ~text_neighborhood[top:bottom, left:right]
+        white = near_white[top:bottom, left:right]
+        # 字芯大部分周长应被白色包围，只有一侧发白的气泡弧线不能当作文字。
+        if not np.any(ring) or np.mean(white[ring]) <= 0.6:
+            continue
+        mask[top:bottom, left:right][component > 0] = 255
+        # 白底黑字没有独立描边：需多个字同时呈现“近处白、远处有底色”。
+        if np.any(surroundings) and np.mean(~white[surroundings]) > 0.5:
+            outlined_components += len(np.unique(labels[top:bottom, left:right][component > 0]))
+    if outlined_components < 2:
+        return None
+
+    grown = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))) > 0
+    limit = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))) > 0
+    adjacency = np.ones((3, 3), dtype=np.uint8)
+    # 仅沿相邻白色像素补足描边，且限制离字芯的距离，避免吞掉整片白背景。
+    for _ in range(5):
+        grown |= (cv2.dilate(grown.astype(np.uint8), adjacency) > 0) & near_white & limit
+    grown = cv2.dilate(grown.astype(np.uint8), adjacency) > 0
+    # 补回已被描边掩码完整覆盖的内部笔画，防止保护逻辑挖出黑洞再被修复算法扩散。
+    # 不做任意孔洞填充；仍保护触边轮廓和只有一部分落入掩码的背景线。
+    for idx in range(1, count):
+        x, y, w, h, _ = stats[idx]
+        component = labels[y:y + h, x:x + w] == idx
+        if (np.any(eligible[y:y + h, x:x + w][component])
+                and np.all(grown[y:y + h, x:x + w][component])):
+            mask[y:y + h, x:x + w][component] = 255
+    grown[strong & (mask == 0)] = False
+    return grown.astype(np.uint8) * 255
+
+
 def _text_mask(crop: np.ndarray, core: np.ndarray, background: np.ndarray | None) -> np.ndarray:
+    outlined = _outlined_text_mask(crop, core)
+    if outlined is not None:
+        return outlined
     if background is not None:
         # 自适应颜色差区分文字主体和透出的浅色背景线，也支持深底白字及等亮度彩字。
         response = np.max(np.abs(crop.astype(np.int16) - background), axis=2).astype(np.uint8)

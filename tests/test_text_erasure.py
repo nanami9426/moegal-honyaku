@@ -28,6 +28,31 @@ def make_text_sample(background, foreground, text="文字。!", font_size=30):
     return image, alpha, bbox
 
 
+def make_outlined_text_sample(
+    background, text, position, font_size=42, stroke_width=3, foreground=(105, 32, 34),
+):
+    """分别保存彩色字芯和白描边真值，防止只擦字芯的掩码误通过检查。"""
+    size = (background.shape[1], background.shape[0])
+    body_image, outline_image = Image.new("L", size), Image.new("L", size)
+    body_draw, outline_draw = ImageDraw.Draw(body_image), ImageDraw.Draw(outline_image)
+    font = ImageFont.truetype(str(FONT_PATH), font_size)
+    x, y = position
+    for row, content in enumerate(text.split("\n")):
+        origin = (x, y + row * (font_size + 7))
+        body_draw.text(origin, content, font=font, fill=255, anchor="lt")
+        outline_draw.text(origin, content, font=font, fill=255, anchor="lt",
+                          stroke_width=stroke_width, stroke_fill=255)
+    body, outline = np.asarray(body_image), np.asarray(outline_image)
+    opacity = outline[..., None].astype(np.float32) / 255
+    image = background * (1 - opacity) + 255 * opacity
+    opacity = body[..., None].astype(np.float32) / 255
+    image = np.rint(image * (1 - opacity) + np.asarray(foreground) * opacity).astype(np.uint8)
+    ys, xs = np.nonzero(outline)
+    bbox = (int(xs.min()) - 4, int(ys.min()) - 4,
+            int(xs.max()) + 5, int(ys.max()) + 5)
+    return image, body, outline, bbox
+
+
 class TextErasureTests(unittest.TestCase):
     def assert_output_contract(self, image, original, erased, mask):
         np.testing.assert_array_equal(image, original)
@@ -93,6 +118,142 @@ class TextErasureTests(unittest.TestCase):
         # 没有文字的渐变仍应保留，不能把整个检测矩形涂成一种颜色。
         away_from_text = cv2.dilate((alpha > 0).astype(np.uint8), np.ones((13, 13), np.uint8)) == 0
         np.testing.assert_array_equal(erased[away_from_text], background[away_from_text])
+
+    def test_erases_white_outlines_of_colored_text_on_a_gradient(self):
+        yy, xx = np.indices((250, 200))
+        background = np.stack(
+            (180 + xx * 0.15, 150 + yy * 0.25, 210 - yy * 0.15), axis=2
+        ).astype(np.uint8)
+        image, body, outline, bbox = make_outlined_text_sample(
+            background, "あ\nっ\nた\n？", (72, 30)
+        )
+        original = image.copy()
+
+        erased, mask = erase_text_regions(image, [bbox])
+
+        self.assert_output_contract(image, original, erased, mask)
+        outline_only = (outline >= 192) & (body == 0)
+        self.assertGreaterEqual(float(np.mean(mask[body >= 192] > 0)), 0.99)
+        self.assertGreaterEqual(float(np.mean(mask[outline_only] > 0)), 0.99)
+        # 少量白边残留就会被修复算法带回字芯，必须同时检查擦后颜色误差。
+        error = np.abs(erased.astype(np.int16) - background.astype(np.int16))
+        self.assertLess(float(error[body > 0].mean()), 10)
+        self.assertLess(float(error[outline_only].mean()), 10)
+
+    def test_preserves_a_shallow_gradient_behind_outlined_text(self):
+        yy, xx = np.indices((250, 200))
+        background = np.stack(
+            (255 - yy * 16 / 249, 255 - yy * 16 * 0.8 / 249,
+             np.full_like(xx, 255)), axis=2,
+        ).astype(np.uint8)
+        image, body, outline, bbox = make_outlined_text_sample(
+            background, "あ\nっ\nた\n？", (72, 30),
+        )
+        original = image.copy()
+
+        erased, mask = erase_text_regions(image, [bbox])
+
+        self.assert_output_contract(image, original, erased, mask)
+        # 浅渐变误刷成单色时平均误差仍很小，还需检查上下行原有的明暗变化。
+        upper_text = (body > 0) & (yy < 100)
+        lower_text = (body > 0) & (yy > 170)
+        contrast = float(erased[upper_text, 0].mean() - erased[lower_text, 0].mean())
+        self.assertGreater(contrast, 5)
+        error = np.abs(erased.astype(np.int16) - background.astype(np.int16))
+        self.assertLess(float(error[outline > 0].mean()), 3)
+        self.assertLessEqual(float(np.percentile(error[outline > 0], 99)), 6)
+
+    def test_erases_outlined_text_touching_a_dark_background_line(self):
+        background = np.full((140, 180, 3), 180, dtype=np.uint8)
+        cv2.line(background, (0, 60), (179, 60), (90, 90, 90), 1)
+        image, body, outline, bbox = make_outlined_text_sample(
+            background, "あ？", (50, 40), font_size=44
+        )
+        original = image.copy()
+        self.assertTrue(np.any(outline[60] >= 192))
+
+        erased, mask = erase_text_regions(image, [bbox])
+
+        self.assert_output_contract(image, original, erased, mask)
+        outline_only = (outline >= 192) & (body == 0)
+        # 明暗响应不能先合并成触边连通域，否则白边会把字芯接到背景线并一起保护。
+        self.assertGreaterEqual(float(np.mean(mask[body >= 192] > 0)), 0.99)
+        self.assertGreaterEqual(float(np.mean(mask[outline_only] > 0)), 0.99)
+        distance = cv2.distanceTransform(
+            (outline == 0).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE
+        )
+        far_from_text = distance > 4
+        self.assertTrue(np.any(far_from_text[60]))
+        np.testing.assert_array_equal(erased[far_from_text], background[far_from_text])
+        error = np.abs(erased.astype(np.int16) - background.astype(np.int16))
+        self.assertLess(float(error[body > 0].mean()), 10)
+        self.assertLess(float(error[outline_only].mean()), 10)
+
+    def test_erases_dense_small_outlined_text_without_black_inpainting_spots(self):
+        background = np.full((120, 170, 3), (254, 234, 247), dtype=np.uint8)
+        image, body, outline, bbox = make_outlined_text_sample(
+            background, "着開続く\nた拓けれ\nらをてる？", (30, 20),
+            font_size=19, stroke_width=2, foreground=(10, 10, 10),
+        )
+        original = image.copy()
+
+        erased, mask = erase_text_regions(image, [bbox])
+
+        self.assert_output_contract(image, original, erased, mask)
+        # 密集小字的内部笔画未必单独被白色包围，漏掉它们会让修复算法扩散黑点。
+        self.assertGreaterEqual(float(np.mean(mask[body >= 192] > 0)), 0.99)
+        self.assertFalse(np.any(erased[outline > 0].max(axis=1) < 100))
+        error = np.abs(erased.astype(np.int16) - background.astype(np.int16))
+        self.assertLess(float(error[outline > 0].mean()), 5)
+
+    def test_preserves_repeated_background_lines_under_outlined_text(self):
+        background = np.full((140, 180, 3), (240, 220, 250), dtype=np.uint8)
+        lines = np.zeros(background.shape[:2], dtype=np.uint8)
+        for x in range(0, background.shape[1], 20):
+            lines[:, x:x + 6] = 255
+        background[lines > 0] = 30
+        image, body, outline, bbox = make_outlined_text_sample(
+            background, "あ？", (40, 45), font_size=30,
+            stroke_width=2, foreground=(10, 10, 10),
+        )
+        original = image.copy()
+
+        erased, mask = erase_text_regions(image, [bbox])
+
+        self.assert_output_contract(image, original, erased, mask)
+        self.assertTrue(np.all(mask[body >= 192] == 255))
+        # 多条背景线各自很细，但合起来不是气泡边框，不能全部排除后刷成粉底。
+        covered_lines = (lines > 0) & (outline >= 192)
+        self.assertGreater(int(np.count_nonzero(covered_lines)), 100)
+        error = np.abs(erased.astype(np.int16) - background.astype(np.int16))
+        # OpenCV 可近似接续被文字遮住的线条；整片填底色会产生超过 200 的误差。
+        self.assertLess(float(error[covered_lines].mean()), 100)
+        far_from_text = cv2.distanceTransform(
+            (outline == 0).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE
+        ) > 4
+        np.testing.assert_array_equal(erased[far_from_text], background[far_from_text])
+
+    def test_erases_outlined_text_near_a_border_without_copying_its_black_color(self):
+        background = np.full((130, 190, 3), (237, 235, 255), dtype=np.uint8)
+        border = np.zeros(background.shape[:2], dtype=np.uint8)
+        cv2.line(border, (0, 35), (189, 35), 255, 2)
+        background[border > 0] = 10
+        image, body, outline, bbox = make_outlined_text_sample(
+            background, "あ？", (50, 40), font_size=30,
+            stroke_width=2, foreground=(10, 10, 10),
+        )
+        original = image.copy()
+
+        erased, mask = erase_text_regions(image, [bbox])
+
+        self.assert_output_contract(image, original, erased, mask)
+        self.assertFalse(np.any(mask[border > 0]))
+        np.testing.assert_array_equal(erased[border > 0], background[border > 0])
+        self.assertTrue(np.all(mask[body >= 192] == 255))
+        # 即使字芯完整、边框未被圈入，也不能把邻近黑边作为颜色来源扩散回文字区。
+        self.assertFalse(np.any(erased[outline > 0].max(axis=1) < 100))
+        error = np.abs(erased.astype(np.int16) - background.astype(np.int16))
+        self.assertLess(float(error[outline > 0].mean()), 5)
 
     def test_preserves_bubble_border_and_pixels_outside_bbox(self):
         background = np.full((105, 180, 3), (160, 115, 90), dtype=np.uint8)
