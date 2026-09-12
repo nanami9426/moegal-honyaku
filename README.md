@@ -81,6 +81,27 @@ uv run uvicorn app.main:app --reload
 uv run uvicorn main:app --reload
 ```
 
+### 4.1 一键更新并启动
+
+- Windows：双击 `update.cmd`。
+- Mac：双击 `update.command`，或运行 `bash update.command`。若缺少执行权限，运行 `chmod +x update.command`。
+- 更新需要 Git，并使用当前分支配置的上游分支；通过 ZIP 下载的目录会跳过自动更新，继续启动本地版本。
+- 有新版且可以快进合并时自动更新，然后按正常启动流程同步依赖、启动服务。
+- 已是最新版，或网络失败、认证失败、拉取超时、有本地修改、分支分叉时，直接使用已有 `.venv` 启动，跳过工具下载与依赖同步。不会自动 stash、强制重置代码或覆盖已有的忽略文件（如 `.env`）。
+- 使用前先停止正在运行的服务；首次运行且尚无本地环境时，仍会进入正常初始化流程，需要联网。已有 OCR 模型会复用，缺失模型和实际翻译接口仍需要网络。
+
+只想使用现有环境、不检查更新也不同步依赖时，可以运行：
+
+```bash
+# macOS
+bash start.command --local
+```
+
+```bat
+:: Windows
+start.cmd --local
+```
+
 
 
 ### 5. 调用接口

@@ -32,6 +32,16 @@ if [ "$(uname -m)" != "arm64" ]; then
     false
 fi
 
+# 更新失败时直接使用已有解释器，跳过 uv、Python 下载和依赖同步。
+if [ "${1:-}" = "--local" ] && [ -x "$ROOT_DIR/.venv/bin/python" ]; then
+    if [ ! -e .env ]; then
+        cp .env.example .env
+    fi
+    echo "[信息] 使用已有本地环境启动：http://127.0.0.1:8000/docs"
+    "$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+    exit $?
+fi
+
 # 将下载缓存和运行环境放在项目内，不修改系统 Python 或 shell 配置。
 UV_BIN="$ROOT_DIR/.tools/uv/uv"
 export UV_CACHE_DIR="$ROOT_DIR/.cache/uv"

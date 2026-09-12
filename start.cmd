@@ -14,6 +14,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem 更新失败时跳过下载和依赖同步，直接使用已有本地环境。
+if /i "%~1"=="--local" (
+    if exist "%ROOT_DIR%.venv\Scripts\python.exe" (
+        if not exist ".env" copy ".env.example" ".env" >nul
+        echo [INFO] Starting with existing local environment ...
+        "%ROOT_DIR%.venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+        exit /b
+    )
+)
+
 set "TOOLS_DIR=%ROOT_DIR%.tools"
 set "UV_HOME=%TOOLS_DIR%\uv"
 set "UV_BIN=%UV_HOME%\uv.exe"
