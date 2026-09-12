@@ -187,7 +187,48 @@ TRANSLATE_WEB_MAX_BODY_BYTES=20971520
 
 如果服务前面有 Nginx、Caddy 或其他反向代理，需要同步放宽对应的请求体大小限制，否则大尺寸 `canvas` PNG 可能会在到达应用前被代理直接拦截。
 
-3. 配置接口
+### 5.2 文字擦除与彩色背景修复
+
+擦除会保留文字附近的细笔画、标点和抗锯齿边缘，同时识别深色、浅色及彩色文字。确认是纯色的气泡会直接补回采样的背景色；渐变、网点和画面背景则交给图像修复。只修改文字掩码覆盖的像素，不直接涂满整个检测框。
+
+默认使用现有 OpenCV，无需新增依赖或下载模型。前端配置面板的“文字擦除方法”可随时选择 OpenCV 或 LaMa，保存后用于下一次翻译，无需重启。以下环境变量仅决定启动或恢复默认时的选择：
+
+```env
+INPAINT_BACKEND=opencv
+```
+
+复杂彩色背景可选择 LaMa。它需要额外的本地模型，CPU 也能运行，但通常比 OpenCV 慢；Windows/Linux 可通过现有 CPU/GPU 设置使用兼容的 NVIDIA 显卡，失败时自动回退 CPU。Mac 当前仍使用 CPU。
+
+先下载 [IOPaint 提供的 LaMa TorchScript 权重](https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt)（约 196 MiB），保存到 `assets/models/lama/big-lama.pt`：
+
+```bash
+# macOS / Linux，在项目根目录执行
+mkdir -p assets/models/lama
+curl -L --fail -o assets/models/lama/big-lama.pt https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt
+```
+
+```powershell
+# Windows PowerShell，在项目根目录执行
+New-Item -ItemType Directory -Force assets/models/lama
+Invoke-WebRequest -Uri https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt -OutFile assets/models/lama/big-lama.pt
+```
+
+下载完成后，在前端面板选择“LaMa”即可使用。如果希望后端每次启动都默认使用 LaMa，可在 `.env` 中设置并重启服务：
+
+```env
+INPAINT_BACKEND=lama
+INPAINT_LAMA_MODEL_PATH=assets/models/lama/big-lama.pt
+```
+
+该权重的 MD5 为 `e3aa4aaa15225a33ec84f9f4bc47e500`，可用于检查下载完整性。`INPAINT_LAMA_MODEL_PATH` 支持绝对路径或相对项目根目录的路径；需要上述 TorchScript 格式，不能直接放入原始 LaMa 训练检查点。
+
+模型在第一次需要修复复杂背景时加载并复用，不会在启动或翻译请求中自动下载。缺失、加载失败或推理失败时，终端会提示并回退 OpenCV，纯色气泡填充仍然生效。修复按文字附近的区域裁剪，保留周边画面作为参考；过大的区域会缩放推理，再仅回贴掩码内像素。
+
+前端会显示当前所选方法与回退状态，点击“重新拉取配置”可刷新。选择保存在后端运行时配置中；重启后端会恢复 `.env` 的默认值。旧版后端不支持此配置时，前端会禁用选择并提示更新。首次更新此功能后需要重启后端、重新加载浏览器扩展。
+
+LaMa 不能补救漏检的文字或不完整的掩码，复杂花字、叠在人物线条上的文字仍可能有残留或修复痕迹。
+
+### 5.3 配置接口
 
 ```bash
 # 初始化为默认配置（custom + parallel）
@@ -218,15 +259,28 @@ curl -X POST "http://127.0.0.1:8000/conf/update" \
 curl -X POST "http://127.0.0.1:8000/conf/update" \
   -H "Content-Type: application/json" \
   -d '{"attr":"use_gpu","v":true}'
+
+# 更新配置示例：切换擦除方法（opencv / lama），下一次翻译生效
+curl -X POST "http://127.0.0.1:8000/conf/update" \
+  -H "Content-Type: application/json" \
+  -d '{"attr":"inpaint_backend","v":"lama"}'
 ```
 
-`/conf/query`、`/conf/init`、`/conf/update` 的返回中会额外带上 `provider_status` 和 `gpu_status`，用于提示当前供应商是否已配置，以及请求的计算设备是否实际可用。例如：
+`/conf/query`、`/conf/init`、`/conf/update` 的返回中会额外带上 `provider_status`、`gpu_status` 和 `inpaint_status`，用于提示当前供应商、计算设备和擦除方法的可用状态。`/conf/options` 的 `inpaint_backend` 返回 `["opencv", "lama"]`。例如：
 
 ```json
 {
   "translate_api_type": "custom",
   "translate_mode": "parallel",
   "use_gpu": true,
+  "inpaint_backend": "opencv",
+  "inpaint_status": {
+    "requested": "opencv",
+    "effective_backend": "opencv",
+    "available": true,
+    "model_loaded": false,
+    "message": "使用 OpenCV 修复背景，纯色气泡优先填充背景色。"
+  },
   "gpu_status": {
     "requested": true,
     "available": false,
@@ -265,6 +319,8 @@ app/
     ocr.py                 # 模型加载与 OCR
     translate_api.py       # 翻译供应商调用逻辑
     pic_process.py         # 图像处理与文本回填
+    text_erasure.py        # 文字掩码与纯色气泡填充
+    inpainting.py          # OpenCV / 可选 LaMa 背景修复
   core/
     custom_conf.py         # 运行时配置管理
     font_conf.py           # 字体配置
@@ -273,7 +329,7 @@ app/
   main.py                  # FastAPI app 创建入口
 
 assets/
-  models/                  # 检测模型与 OCR 模型
+  models/                  # 检测、OCR 与可选 LaMa 模型
   fonts/                   # 绘制中文字体
   pics/                    # 示例图片
 

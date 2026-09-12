@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 from app.api.routes.update_conf import UpdateItem, update_conf
 from app.core.custom_conf import CustomConf, custom_conf
+from app.services import inpainting
 
 
 class CustomConfGpuTests(unittest.TestCase):
@@ -33,6 +34,10 @@ class CustomConfGpuTests(unittest.TestCase):
 class UpdateConfGpuTests(unittest.TestCase):
     def setUp(self):
         self.old_use_gpu = custom_conf.use_gpu
+        # GPU 配置用例只验证 OCR 状态，避免模块替身影响擦除模型的导入缓存。
+        status_patch = patch.object(inpainting, "get_inpaint_status", return_value={})
+        status_patch.start()
+        self.addCleanup(status_patch.stop)
 
     def tearDown(self):
         custom_conf.use_gpu = self.old_use_gpu

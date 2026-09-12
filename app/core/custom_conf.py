@@ -8,6 +8,7 @@ load_dotenv()
 
 TRANSLATE_API_TYPE_OPTIONS = ("dashscope", "custom")
 TRANSLATE_MODE_OPTIONS = ("parallel", "structured")
+INPAINT_BACKEND_OPTIONS = ("opencv", "lama")
 
 
 def _is_true_env(name: str, default: bool = False) -> bool:
@@ -20,6 +21,18 @@ def _is_true_env(name: str, default: bool = False) -> bool:
 DEFAULT_USE_GPU = _is_true_env("MOEGAL_USE_GPU", default=False)
 
 
+def _inpaint_backend_from_env() -> str:
+    backend = os.getenv("INPAINT_BACKEND", "opencv").strip().lower()
+    if backend not in INPAINT_BACKEND_OPTIONS:
+        logger.warning(f"未知背景修复后端 {backend!r}，默认使用 OpenCV")
+        return "opencv"
+    return backend
+
+
+# 环境变量只决定启动及恢复默认时的选择，前端切换不改写 .env。
+DEFAULT_INPAINT_BACKEND = _inpaint_backend_from_env()
+
+
 class CustomConf:
     def __init__(
             self,
@@ -29,10 +42,12 @@ class CustomConf:
             translate_mode="parallel",
             # 可由前端在运行时切换；环境变量只决定服务启动时的默认值。
             use_gpu=DEFAULT_USE_GPU,
+            inpaint_backend=DEFAULT_INPAINT_BACKEND,
             ):
         self.translate_api_type = translate_api_type
         self.translate_mode = translate_mode
         self.use_gpu = use_gpu
+        self.inpaint_backend = inpaint_backend
 
     def update_conf(self, attr, v):
         if not hasattr(self, attr):
@@ -47,6 +62,8 @@ class CustomConf:
             )
         if attr == "use_gpu" and type(v) is not bool:
             raise ValueError("use_gpu 必须是布尔值")
+        if attr == "inpaint_backend" and v not in INPAINT_BACKEND_OPTIONS:
+            raise ValueError(f"inpaint_backend 必须是 {INPAINT_BACKEND_OPTIONS}")
         setattr(self, attr, v)
         logger.info(f"将 {attr} 设置为 {v}")
         return {

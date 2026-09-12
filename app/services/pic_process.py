@@ -9,9 +9,9 @@ from PIL import Image, ImageDraw, ImageFont
 from app.core.font_conf import FontConfig
 from app.core.paths import SAVED_DIR
 from app.services.ocr import get_mocr
+from app.services.text_erasure import erase_text_regions
 
 OCR_MAX_CONCURRENCY = max(1, int(os.getenv("OCR_MAX_CONCURRENCY", "2")))
-INPAINT_RADIUS = 2
 TextDirection = Literal["horizontal", "vertical"]
 MIN_FONT_SIZE = 1
 
@@ -25,40 +25,7 @@ def _sanitize_bbox(bbox, width: int, height: int):
     return x1, y1, x2, y2
 
 
-def _build_text_mask(cropped_cv: np.ndarray) -> np.ndarray:
-    if cropped_cv.size == 0:
-        return np.zeros((0, 0), dtype=np.uint8)
-
-    gray = cv2.cvtColor(cropped_cv, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (3, 3), 0)
-
-    # 黑帽突出深色细节，可避免把半透明气泡整体选进掩码。
-    kernel_size = max(3, min(11, (min(cropped_cv.shape[:2]) // 10) * 2 + 1))
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
-    blackhat = cv2.morphologyEx(blur, cv2.MORPH_BLACKHAT, kernel)
-    _, bh_mask = cv2.threshold(blackhat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # 兜底保留极深像素，兼容描边文字。
-    p15 = float(np.percentile(blur, 15))
-    dark_threshold = int(max(30, min(120, p15)))
-    dark_mask = cv2.inRange(blur, 0, dark_threshold)
-
-    merged = cv2.bitwise_or(bh_mask, dark_mask)
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(merged, connectivity=8)
-    filtered = np.zeros_like(merged)
-    area = cropped_cv.shape[0] * cropped_cv.shape[1]
-    min_area = max(6, int(area * 0.0002))
-    max_area = max(20, int(area * 0.2))
-    for idx in range(1, num_labels):
-        component_area = int(stats[idx, cv2.CC_STAT_AREA])
-        if min_area <= component_area <= max_area:
-            filtered[labels == idx] = 255
-
-    return cv2.dilate(filtered, np.ones((2, 2), dtype=np.uint8), iterations=1)
-
-
 async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
-    mask = np.zeros(image_cv.shape[:2], dtype=np.uint8)
     if len(bboxes) == 0:
         return [], image_cv
 
@@ -66,26 +33,16 @@ async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
     mocr = get_mocr()
     semaphore = asyncio.Semaphore(min(OCR_MAX_CONCURRENCY, len(bboxes)))
 
-    async def ocr_and_mask(bbox):
+    async def recognize(bbox):
         x1, y1, x2, y2 = _sanitize_bbox(bbox, width, height)
         cropped_image = image_pil.crop((x1, y1, x2, y2))
         async with semaphore:
-            text = await asyncio.to_thread(mocr, cropped_image)
-        local_mask = _build_text_mask(image_cv[y1:y2, x1:x2])
-        return text, (x1, y1, x2, y2), local_mask
+            return await asyncio.to_thread(mocr, cropped_image)
 
-    tasks = [ocr_and_mask(bbox) for bbox in bboxes]
-    results = await asyncio.gather(*tasks)
-    all_text = []
-    for text, (x1, y1, x2, y2), local_mask in results:
-        all_text.append(text)
-        if local_mask.size == 0:
-            continue
-        target = mask[y1:y2, x1:x2]
-        np.maximum(target, local_mask, out=target)
-
-    if inpaint and np.any(mask):
-        image_cv = cv2.inpaint(image_cv, mask, inpaintRadius=INPAINT_RADIUS, flags=cv2.INPAINT_TELEA)
+    all_text = await asyncio.gather(*(recognize(bbox) for bbox in bboxes))
+    if inpaint:
+        # 图像处理和可选模型推理在线程中执行，避免阻塞异步接口。
+        image_cv, _ = await asyncio.to_thread(erase_text_regions, image_cv, bboxes)
     return all_text, image_cv
 
 
