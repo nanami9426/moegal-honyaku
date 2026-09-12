@@ -143,6 +143,6 @@ def erase_text_regions(image_bgr: np.ndarray, bboxes) -> tuple[np.ndarray, np.nd
             np.maximum(target, local_mask, out=target)
 
     if np.any(repair_mask):
-        # 已填好的纯色区域也作为干净上下文；只把仍需修复的区域交给后端。
+        # 已填好的纯色区域也作为干净上下文；其余文字区域使用 OpenCV 修复。
         result = inpaint_image(result, repair_mask)
     return result, mask

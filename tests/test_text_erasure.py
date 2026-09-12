@@ -1,12 +1,10 @@
 from pathlib import Path
 import unittest
-from unittest.mock import patch
 
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from app.core.custom_conf import custom_conf
 from app.services.text_erasure import erase_text_regions
 
 
@@ -30,7 +28,6 @@ def make_text_sample(background, foreground, text="文字。!", font_size=30):
     return image, alpha, bbox
 
 
-@patch.object(custom_conf, "inpaint_backend", "opencv")
 class TextErasureTests(unittest.TestCase):
     def assert_output_contract(self, image, original, erased, mask):
         np.testing.assert_array_equal(image, original)

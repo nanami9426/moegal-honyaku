@@ -1,8 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.core.custom_conf import (
-    DEFAULT_INPAINT_BACKEND,
     DEFAULT_USE_GPU,
-    INPAINT_BACKEND_OPTIONS,
     custom_conf,
     TRANSLATE_API_TYPE_OPTIONS,
     TRANSLATE_MODE_OPTIONS,
@@ -18,24 +16,21 @@ class UpdateItem(BaseModel):
 
 
 def _serialize_conf():
-    from app.services.inpainting import get_inpaint_status
     from app.services.ocr import get_gpu_status
 
     payload = custom_conf.to_dict()
     payload["provider_status"] = get_provider_status()
     payload["gpu_status"] = get_gpu_status()
-    payload["inpaint_status"] = get_inpaint_status()
     return payload
 
 
 @update_conf_router.post("/conf/init")
 def init_conf():
-    # 初始化默认值，并恢复服务启动时的设备和擦除方式偏好。
+    # 初始化默认值，并恢复服务启动时的设备偏好。
     old_use_gpu = custom_conf.use_gpu
     custom_conf.update_conf("translate_api_type", "custom")
     custom_conf.update_conf("translate_mode", "parallel")
     custom_conf.update_conf("use_gpu", DEFAULT_USE_GPU)
-    custom_conf.update_conf("inpaint_backend", DEFAULT_INPAINT_BACKEND)
     if old_use_gpu != custom_conf.use_gpu:
         from app.services.ocr import reset_models
 
@@ -66,5 +61,4 @@ def query_conf_options():
         "translate_api_type": list(TRANSLATE_API_TYPE_OPTIONS),
         "translate_mode": list(TRANSLATE_MODE_OPTIONS),
         "use_gpu": [False, True],
-        "inpaint_backend": list(INPAINT_BACKEND_OPTIONS),
     }

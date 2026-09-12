@@ -41,7 +41,7 @@ async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
 
     all_text = await asyncio.gather(*(recognize(bbox) for bbox in bboxes))
     if inpaint:
-        # 图像处理和可选模型推理在线程中执行，避免阻塞异步接口。
+        # 文字掩码生成和背景修复在线程中执行，避免阻塞异步接口。
         image_cv, _ = await asyncio.to_thread(erase_text_regions, image_cv, bboxes)
     return all_text, image_cv
 
