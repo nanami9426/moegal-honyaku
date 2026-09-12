@@ -164,6 +164,31 @@ class MacUpdateLauncherTests(unittest.TestCase):
             self.assertEqual("CUSTOM_API_KEY=keep", (root / ".env").read_text())
             self.assertFalse((root / ".tools").exists())
 
+            # 普通启动也必须复用环境，不运行更新器、uv 或任何下载工具。
+            (root / "scripts/update_project.py").write_text("raise RuntimeError('must not update')")
+            result = subprocess.run(
+                ["bash", str(root / "start.command")], cwd="/tmp",
+                env=dict(os.environ, LAUNCH_LOG=str(root / "launch.log")),
+                capture_output=True, text=True, timeout=20,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertFalse((root / ".tools").exists())
+
+    def test_successful_update_explicitly_syncs_dependencies(self):
+        project = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory(prefix="moegal update launch ") as directory:
+            root = Path(directory)
+            shutil.copy(project / "update.command", root)
+            (root / "scripts").mkdir()
+            (root / "scripts/update_project.py").write_text("raise SystemExit(0)")
+            (root / "start.command").write_text('printf "%s" "$*" > launch.args\n')
+            python = root / ".venv/bin/python"
+            python.parent.mkdir(parents=True)
+            python.symlink_to(sys.executable)
+            result = subprocess.run(["bash", str(root / "update.command")], capture_output=True, timeout=20)
+            self.assertEqual(0, result.returncode)
+            self.assertEqual("--sync", (root / "launch.args").read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,8 +32,10 @@ if [ "$(uname -m)" != "arm64" ]; then
     false
 fi
 
-# 更新失败时直接使用已有解释器，跳过 uv、Python 下载和依赖同步。
-if [ "${1:-}" = "--local" ] && [ -x "$ROOT_DIR/.venv/bin/python" ]; then
+# 普通启动只复用已安装的环境；更新入口显式传 --sync 才同步依赖。
+# 用包元数据区分可用环境与首次安装中断后留下的空 .venv。
+if [ "${1:-}" != "--sync" ] && [ -x "$ROOT_DIR/.venv/bin/python" ] &&
+    "$ROOT_DIR/.venv/bin/python" -c 'from importlib.metadata import version; [version(p) for p in ("uvicorn", "fastapi", "torch", "torchvision", "manga-ocr")]' >/dev/null 2>&1; then
     if [ ! -e .env ]; then
         cp .env.example .env
     fi
@@ -74,4 +76,4 @@ fi
 
 echo "[信息] 启动服务：http://127.0.0.1:8000/docs"
 echo "[信息] 首次启动会自动下载 OCR 模型；按 Ctrl+C 停止服务。"
-"$UV_BIN" run --python 3.12 uvicorn app.main:app --host 0.0.0.0 --port 8000
+"$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8000

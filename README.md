@@ -27,6 +27,14 @@
 uv sync
 ```
 
+首次启动下载较慢时，先看终端当前下载的内容：
+
+- Python 依赖已默认使用清华源；Windows 的 CUDA 版 PyTorch 使用独立的 PyTorch 源，切换普通 Python 包镜像不会改变它的下载源。
+- OCR 模型默认使用 `hf-mirror.com`，失败后本轮后续文件改用 Hugging Face 官方源。默认同时下载 2 个文件，可在 `.env` 设置 `MODEL_DOWNLOAD_WORKERS=1`～`8`。
+- 元数据请求遇到临时连接中断（包括 TLS EOF）时会有限重试，证书校验保持开启。并发数控制的是不同文件；只剩一个大文件时，调高它不能加速该文件。
+- 如果日志反复显示镜像不可用，而官方源能下载，可在 `.env` 设置 `HF_ENDPOINT=https://huggingface.co`、`HF_FALLBACK_ENDPOINT=https://hf-mirror.com` 后重新启动。已有环境变量的优先级高于 `.env`。
+- 保留 `assets/models/`（包括里面的 `.cache/`）和 `.cache/uv/`，重试会复用已完成文件及下载缓存。也可从已完成模型下载的电脑复制整个 `assets/models/`；模型文件可在 Mac 和 Windows 间共用，`.venv` 不能跨系统复制。
+
 ### 3. 配置环境变量
 
 在根目录复制 `.env.example` 为 `.env`，然后编辑 `.env`（一键启动脚本会在文件不存在时自动创建，不覆盖已有配置）。
@@ -69,7 +77,8 @@ uv run uvicorn app.main:app --reload
 - Windows：双击根目录 `start.cmd`。
 - Mac（M 系列芯片）：双击根目录 `start.command`，或在终端运行 `./start.command`。
 - 如果下载 ZIP 后 Mac 脚本没有执行权限，在项目目录执行 `chmod +x start.command` 后重试；也可运行 `bash start.command`。
-- 两个脚本都会在项目目录内自动准备 `uv`、Python `3.12` 和依赖，并在缺少 `.env` 时从示例创建。
+- 首次启动时，两个脚本会在项目目录内自动准备 `uv`、Python `3.12` 和依赖，并在缺少 `.env` 时从示例创建。
+- 以后双击 `start.cmd` / `start.command` 直接使用已有环境，不检查 Git 更新，也不同步依赖。只有点击更新脚本才检查新版；模型文件若还没下载完整，仍需要继续补齐。
 - 本地运行时目录为 `.tools/`、`.python/`、`.venv/`，依赖缓存位于 `.cache/uv/`。
 - 首次运行需要联网下载工具、依赖与 OCR 模型。模型保存在 `assets/models/`，后续启动复用已有文件。
 - 服务就绪后访问 `http://127.0.0.1:8000/docs` 测试接口，保持终端开启，按 `Ctrl+C` 停止服务。
@@ -86,11 +95,11 @@ uv run uvicorn main:app --reload
 - Windows：双击 `update.cmd`。
 - Mac：双击 `update.command`，或运行 `bash update.command`。若缺少执行权限，运行 `chmod +x update.command`。
 - 更新需要 Git，并使用当前分支配置的上游分支；通过 ZIP 下载的目录会跳过自动更新，继续启动本地版本。
-- 有新版且可以快进合并时自动更新，然后按正常启动流程同步依赖、启动服务。
+- 有新版且可以快进合并时自动更新，然后通过 `start.cmd --sync` / `start.command --sync` 同步依赖、启动服务。
 - 已是最新版，或网络失败、认证失败、拉取超时、有本地修改、分支分叉时，直接使用已有 `.venv` 启动，跳过工具下载与依赖同步。不会自动 stash、强制重置代码或覆盖已有的忽略文件（如 `.env`）。
 - 使用前先停止正在运行的服务；首次运行且尚无本地环境时，仍会进入正常初始化流程，需要联网。已有 OCR 模型会复用，缺失模型和实际翻译接口仍需要网络。
 
-只想使用现有环境、不检查更新也不同步依赖时，可以运行：
+普通启动已默认复用现有环境，原来的 `--local` 参数仍兼容：
 
 ```bash
 # macOS
@@ -101,6 +110,8 @@ bash start.command --local
 :: Windows
 start.cmd --local
 ```
+
+手动修改依赖后需要同步环境时，可显式运行 `bash start.command --sync` 或 `start.cmd --sync`。
 
 
 

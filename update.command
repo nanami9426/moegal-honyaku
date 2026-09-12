@@ -9,7 +9,7 @@ main() {
         update_python="$(command -v python3)"
     fi
     if [ -n "$update_python" ] && "$update_python" "$root_dir/scripts/update_project.py"; then
-        bash "$root_dir/start.command"
+        bash "$root_dir/start.command" --sync
     else
         echo "[信息] 继续启动本地版本；已有环境无需联网安装依赖。"
         bash "$root_dir/start.command" --local

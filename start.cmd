@@ -14,13 +14,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem 更新失败时跳过下载和依赖同步，直接使用已有本地环境。
-if /i "%~1"=="--local" (
+rem 普通启动复用已有环境；更新入口传 --sync 才主动同步依赖。
+if /i not "%~1"=="--sync" (
     if exist "%ROOT_DIR%.venv\Scripts\python.exe" (
-        if not exist ".env" copy ".env.example" ".env" >nul
-        echo [INFO] Starting with existing local environment ...
-        "%ROOT_DIR%.venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-        exit /b
+        "%ROOT_DIR%.venv\Scripts\python.exe" -c "from importlib.metadata import version; [version(p) for p in ('uvicorn', 'fastapi', 'torch', 'torchvision', 'manga-ocr')]" >nul 2>&1
+        if not errorlevel 1 (
+            if not exist ".env" copy ".env.example" ".env" >nul
+            echo [INFO] Starting with existing local environment ...
+            "%ROOT_DIR%.venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+            exit /b
+        )
     )
 )
 
@@ -73,7 +76,7 @@ if not exist ".env" (
 )
 
 echo [INFO] Starting service ...
-call "%UV_BIN%" run --python 3.12 uvicorn main:app --host 0.0.0.0 --port 8000
+"%ROOT_DIR%.venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 set "EXIT_CODE=%ERRORLEVEL%"
 exit /b %EXIT_CODE%
 

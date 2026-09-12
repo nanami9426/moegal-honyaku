@@ -1,12 +1,21 @@
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path, PurePosixPath
+from threading import Event
 from urllib.parse import unquote
 
+from dotenv import load_dotenv
 from filelock import FileLock
-from huggingface_hub import hf_hub_download
+from huggingface_hub import configure_http_backend, hf_hub_download
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from app.core.logger import logger
-from app.core.paths import ASSETS_DIR, MODELS_DIR
+from app.core.paths import ASSETS_DIR, MODELS_DIR, PROJECT_ROOT
+
+# 此模块在 OCR 配置之前导入，必须先读取 .env 才能应用下载源设置。
+load_dotenv(PROJECT_ROOT / ".env")
 
 OFFICIAL_HF_ENDPOINT = "https://huggingface.co"
 HF_ENDPOINT = os.getenv("HF_ENDPOINT", os.getenv("HF_BASE_URL", "https://hf-mirror.com")).rstrip("/")
@@ -21,6 +30,20 @@ TEXT_BUBBLE_DETECTOR_MODEL_DIR = "comic-text-and-bubble-detector"
 MODELS_MANIFEST_PATH = ASSETS_DIR / "models_manifest.txt"
 SYNC_LOCK_PATH = MODELS_DIR / ".sync.lock"
 SYNC_LOCK_TIMEOUT_SECONDS = 600
+
+
+def _download_session() -> requests.Session:
+    # Hub 的 HEAD 元数据请求默认不重试连接异常；用已有 HTTP 库处理瞬时 TLS 中断。
+    # 保留证书校验和系统/环境代理设置，不使用 verify=False 绕过 TLS。
+    session = requests.Session()
+    retry = Retry(
+        total=3, connect=3, read=3, other=3, status=3,
+        backoff_factor=0.5, allowed_methods=frozenset({"GET", "HEAD"}),
+        status_forcelist=(429, 500, 502, 503, 504),
+    )
+    for scheme in ("https://", "http://"):
+        session.mount(scheme, HTTPAdapter(max_retries=retry))
+    return session
 
 def _format_size(size_in_bytes: int) -> str:
     if size_in_bytes < 1024:
@@ -88,25 +111,28 @@ def _resolve_hf_download_target(relative_path: str) -> tuple[str, str, Path]:
     raise RuntimeError(f"未配置下载地址的模型文件: {relative_path}")
 
 
-def _download_single_file(relative_path: str) -> None:
+def _download_single_file(relative_path: str, fallback_active: Event) -> None:
     repo_id, filename, local_dir = _resolve_hf_download_target(relative_path)
     local_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"开始下载 {relative_path} (repo={repo_id}, endpoint={HF_ENDPOINT})")
+    endpoint = HF_FALLBACK_ENDPOINT if fallback_active.is_set() else HF_ENDPOINT
+    logger.info(f"开始下载 {relative_path} (repo={repo_id}, endpoint={endpoint})")
 
     download_kwargs = {
         "repo_id": repo_id,
         "filename": filename,
         "local_dir": str(local_dir),
-        "endpoint": HF_ENDPOINT,
+        "endpoint": endpoint,
     }
 
     try:
         hf_hub_download(**download_kwargs)
     except Exception as exc:
-        if not HF_FALLBACK_ENDPOINT or HF_FALLBACK_ENDPOINT == HF_ENDPOINT:
+        if not HF_FALLBACK_ENDPOINT or HF_FALLBACK_ENDPOINT == endpoint:
             raise
+        # 仅在本轮下载内记住失败源；后续任务不再逐文件重试同一个不可用镜像。
+        fallback_active.set()
         logger.warning(
-            f"Download failed from {HF_ENDPOINT}, retrying with {HF_FALLBACK_ENDPOINT}: {exc}"
+            f"Download failed from {endpoint}, switching to {HF_FALLBACK_ENDPOINT}: {exc}"
         )
         download_kwargs["endpoint"] = HF_FALLBACK_ENDPOINT
         hf_hub_download(**download_kwargs)
@@ -142,8 +168,29 @@ def ensure_models_ready() -> None:
             (MODELS_DIR / relative_dir).mkdir(parents=True, exist_ok=True)
 
         total = len(missing_files)
-        for index, relative_path in enumerate(missing_files, start=1):
-            _download_single_file(relative_path)
-            logger.info(f"模型缺失文件下载 {index}/{total}: {relative_path}")
+        try:
+            workers = max(1, min(8, int(os.getenv("MODEL_DOWNLOAD_WORKERS", "2"))))
+        except ValueError:
+            logger.warning("MODEL_DOWNLOAD_WORKERS 无效，使用默认并发数 2")
+            workers = 2
+        workers = min(workers, total)
+        logger.info(f"使用 {workers} 个并发任务下载模型；已有文件和下载缓存将继续复用")
+        configure_http_backend(backend_factory=_download_session)
+        fallback_active = Event()
+        # 复用 Hugging Face 的下载、缓存与断点恢复逻辑，只并行处理不同文件。
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(_download_single_file, path, fallback_active): path
+                for path in missing_files
+            }
+            try:
+                for index, future in enumerate(as_completed(futures), start=1):
+                    future.result()
+                    logger.info(f"模型缺失文件下载 {index}/{total}: {futures[future]}")
+            except Exception:
+                # 保留已完成文件；取消尚未开始的任务，下一次启动继续补齐。
+                for future in futures:
+                    future.cancel()
+                raise
 
         logger.info(f"模型缺失文件下载完成，共 {len(missing_files)} 个文件")

@@ -13,7 +13,7 @@ rem 预先解析整个命令块，避免更新覆盖当前批处理文件后读�
         echo [INFO] Starting local version without reinstalling existing dependencies.
         call "%~dp0start.cmd" --local
     ) else (
-        call "%~dp0start.cmd"
+        call "%~dp0start.cmd" --sync
     )
     exit /b
 )
