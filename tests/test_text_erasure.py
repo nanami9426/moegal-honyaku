@@ -86,6 +86,63 @@ class TextErasureTests(unittest.TestCase):
                 self.assertLessEqual(float(text_error.mean()), 2)
                 self.assertLessEqual(float(np.percentile(text_error, 99)), 6)
 
+    def test_erases_dense_white_text_with_dark_counters(self):
+        for color in ((0, 0, 0), (25, 32, 40)):
+            for text in ("翻譯翻譯", "回国目品語器。!", "だけ触らせて"):
+                with self.subTest(background=color, text=text):
+                    background = np.full((120, 400, 3), color, dtype=np.uint8)
+                    image, alpha, bbox = make_text_sample(
+                        background, (255, 255, 255), text=text, font_size=42
+                    )
+                    original = image.copy()
+
+                    erased, mask = erase_text_regions(image, [bbox])
+
+                    self.assert_output_contract(image, original, erased, mask)
+                    # 封闭字形里的暗孔不是带白描边的字芯，所有亮笔画都应被擦除。
+                    self.assertTrue(np.all(mask[alpha >= 192] == 255))
+                    error = np.abs(erased.astype(np.int16) - background.astype(np.int16))
+                    self.assertLessEqual(float(error[alpha > 0].mean()), 2)
+                    self.assertLessEqual(float(np.percentile(error[alpha > 0], 99)), 6)
+
+    def test_erases_white_text_with_dark_counters_on_a_gradient(self):
+        gradient = np.tile(np.linspace(10, 70, 400, dtype=np.uint8), (120, 1))
+        background = np.repeat(gradient[..., None], 3, axis=2)
+        image, alpha, bbox = make_text_sample(
+            background, (255, 255, 255), text="回国目品語器", font_size=42
+        )
+        original = image.copy()
+
+        erased, mask = erase_text_regions(image, [bbox])
+
+        self.assert_output_contract(image, original, erased, mask)
+        self.assertTrue(np.all(mask[alpha >= 192] == 255))
+        error = np.abs(erased.astype(np.int16) - background.astype(np.int16))
+        self.assertLess(float(error[alpha > 0].mean()), 4)
+        self.assertLessEqual(float(np.percentile(error[alpha > 0], 99)), 8)
+        # 擦字后仍须保留渐变，文字邻域之外的背景不应被涂平。
+        away_from_text = cv2.dilate((alpha > 0).astype(np.uint8), np.ones((13, 13), np.uint8)) == 0
+        np.testing.assert_array_equal(erased[away_from_text], background[away_from_text])
+
+    def test_preserves_white_border_while_erasing_white_text_in_a_black_bubble(self):
+        background = np.full((130, 400, 3), 145, dtype=np.uint8)
+        cv2.rectangle(background, (24, 20), (355, 110), (0, 0, 0), -1)
+        cv2.rectangle(background, (24, 20), (355, 110), (255, 255, 255), 2)
+        image, alpha, _ = make_text_sample(
+            background, (255, 255, 255), text="回国目品語器", font_size=42
+        )
+        original = image.copy()
+        bbox = (27, 23, 353, 108)
+
+        erased, mask = erase_text_regions(image, [bbox])
+
+        self.assert_output_contract(image, original, erased, mask)
+        self.assertTrue(np.all(mask[alpha >= 192] == 255))
+        outside = np.ones(mask.shape, dtype=bool)
+        outside[bbox[1]:bbox[3], bbox[0]:bbox[2]] = False
+        self.assertFalse(np.any(mask[outside]))
+        np.testing.assert_array_equal(erased, background)
+
     def test_keeps_small_punctuation_in_the_erasure_mask(self):
         background = np.full((105, 180, 3), 250, dtype=np.uint8)
         image, _, bbox = make_text_sample(background, (10, 10, 10), text="文字")

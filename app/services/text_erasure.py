@@ -112,6 +112,8 @@ def _outlined_text_mask(crop: np.ndarray, core: np.ndarray) -> np.ndarray | None
     groups = cv2.dilate(eligible, near_kernel)
     group_count, group_labels, group_stats, _ = cv2.connectedComponentsWithStats(groups, connectivity=8)
     text_neighborhood = cv2.dilate(strong.astype(np.uint8), ring_kernel) > 0
+    background = _dominant_color(crop[core])
+    dominant_lightness = cv2.cvtColor(background.reshape(1, 1, 3), cv2.COLOR_BGR2LAB)[0, 0, 0]
     outlined_components = 0
     for idx in range(1, group_count):
         x, y, w, h, _ = group_stats[idx]
@@ -133,7 +135,13 @@ def _outlined_text_mask(crop: np.ndarray, core: np.ndarray) -> np.ndarray | None
         mask[top:bottom, left:right][component > 0] = 255
         # 白底黑字没有独立描边：需多个字同时呈现“近处白、远处有底色”。
         if np.any(surroundings) and np.mean(~white[surroundings]) > 0.5:
-            outlined_components += len(np.unique(labels[top:bottom, left:right][component > 0]))
+            # 白字内部的暗孔也符合白色包围条件；字芯还须比附近底色更暗。
+            # 局部取样兼容渐变底，再用主底色限制亮度，避免密集白字的灰边污染外圈。
+            local_lightness = lightness[top:bottom, left:right]
+            core_lightness = np.median(local_lightness[component > 0])
+            background_lightness = np.median(local_lightness[surroundings & ~white])
+            if min(background_lightness, dominant_lightness) - core_lightness > 16:
+                outlined_components += len(np.unique(labels[top:bottom, left:right][component > 0]))
     if outlined_components < 2:
         return None
 
