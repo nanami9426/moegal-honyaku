@@ -2,12 +2,16 @@ import asyncio
 import json
 import os
 import re
+import hashlib
 from functools import lru_cache
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 load_dotenv()
+
+# 接口并发与图片并发分开限制，一张图片里的多句翻译也计入同一个限额。
+TRANSLATE_API_SEMAPHORE = asyncio.Semaphore(max(1, int(os.getenv("TRANSLATE_API_CONCURRENCY", "8"))))
 
 # 统一翻译风格：仅输出翻译内容，不附加解释。
 TRANSLATE_SYSTEM_PROMPT = "将句子翻译成中文（如果是符号就直接输出，不要加任何解释、注解或括号内容，仅保留自然对话或原声风格的翻译。）"
@@ -56,6 +60,13 @@ def get_provider_status():
         "dashscope": _provider_status_item("dashscope", "DASHSCOPE_API_KEY"),
         "custom": _provider_status_item("custom", "CUSTOM_API_KEY"),
     }
+
+
+def translation_config_key(api_type: str) -> str:
+    """缓存按供应商、地址、模型和凭据区分；不在缓存键或日志中暴露密钥。"""
+    prefix = "DASHSCOPE" if api_type == "dashscope" else "CUSTOM"
+    values = [api_type, *(_read_env(f"{prefix}_{name}") for name in ("BASE_URL", "MODEL", "API_KEY"))]
+    return hashlib.sha256(json.dumps(values).encode()).hexdigest()
 
 
 @lru_cache(maxsize=None)
@@ -159,14 +170,15 @@ async def _translate_single(sentence: str, api_type: str):
     if not sentence:
         return "", 0.0
     client, model, extra_kwargs = _provider_options(api_type)
-    res = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": TRANSLATE_SYSTEM_PROMPT},
-            {"role": "user", "content": sentence},
-        ],
-        **extra_kwargs,
-    )
+    async with TRANSLATE_API_SEMAPHORE:
+        res = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": TRANSLATE_SYSTEM_PROMPT},
+                {"role": "user", "content": sentence},
+            ],
+            **extra_kwargs,
+        )
     content = _normalize_content(res.choices[0].message.content)
     return content, 0.0
 
@@ -187,14 +199,15 @@ async def _translate_structured(all_text, api_type: str):
         return [], 0.0
     client, model, extra_kwargs = _provider_options(api_type)
     payload = json.dumps(all_text, ensure_ascii=False)
-    res = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": TRANSLATE_STRUCTURED_SYSTEM_PROMPT},
-            {"role": "user", "content": payload},
-        ],
-        **extra_kwargs,
-    )
+    async with TRANSLATE_API_SEMAPHORE:
+        res = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": TRANSLATE_STRUCTURED_SYSTEM_PROMPT},
+                {"role": "user", "content": payload},
+            ],
+            **extra_kwargs,
+        )
     raw = _normalize_content(res.choices[0].message.content)
     return _parse_structured_result(raw, len(all_text)), 0.0
 

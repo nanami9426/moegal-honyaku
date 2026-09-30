@@ -5,17 +5,14 @@ import random
 import time
 from typing import Literal, cast
 
-import cv2
 import httpx
-import numpy as np
 from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile
 from fastapi.responses import JSONResponse
-from PIL import Image
 from pydantic import BaseModel, ValidationError, field_validator, model_validator
 
-from app.core.custom_conf import custom_conf
 from app.core.logger import logger
 from app.services.translate_api import MissingTranslateProviderConfigError
+from app.services.image_translation import TranslationBusyError, translate_image
 from app.services.web_image_input import (
     TranslateWebInputError,
     decode_image_base64_data_url,
@@ -28,17 +25,6 @@ DOWNLOAD_RETRY_COUNT = 2
 DOWNLOAD_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
 TEXT_DIRECTION_OPTIONS = ("horizontal", "vertical")
 TextDirection = Literal["horizontal", "vertical"]
-
-
-def _decode_image(file_bytes: bytes):
-    if not file_bytes:
-        raise TranslateWebInputError(400, "图片为空")
-    np_arr = np.frombuffer(file_bytes, np.uint8)
-    img_bgr_cv = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    if img_bgr_cv is None:
-        raise TranslateWebInputError(400, "图片解码失败，请确认输入为有效图片")
-    img_rgb = cv2.cvtColor(img_bgr_cv, cv2.COLOR_BGR2RGB)
-    return img_bgr_cv, Image.fromarray(img_rgb)
 
 
 async def _download_image_bytes(image_url: str, referer: str) -> bytes:
@@ -82,42 +68,31 @@ async def _translate_image_bytes(
     include_res_img: bool,
     background_tasks: BackgroundTasks,
     text_direction: TextDirection = "horizontal",
+    force_refresh: bool = False,
 ):
-    from app.services.ocr import detect_text_bubbles
-    from app.services.pic_process import draw_text_on_boxes, get_text_masked_pic, save_img
-    from app.services.translate_api import translate_req
+    result = await translate_image(file_bytes, text_direction, force_refresh=force_refresh)
+    metadata = {key: result[key] for key in ("timings", "cache_hit", "coalesced")}
+    if result.get("code") == "NO_TEXT_BUBBLES":
+        return {"status": "skipped", "code": "NO_TEXT_BUBBLES", "info": "未检测出文字气泡", **metadata}
 
-    price = -0.0001
-    img_bgr_cv, img_pil = _decode_image(file_bytes)
-    bboxes = detect_text_bubbles(img_bgr_cv)
-    all_text, inpaint = await get_text_masked_pic(img_pil, img_bgr_cv, bboxes, True)
-    if len(all_text) == 0:
-        logger.warning("未检测出文字")
-        return None, None, None, None
+    from app.services.pic_process import save_img
 
-    cn_text, price = await translate_req(
-        all_text,
-        api_type=custom_conf.translate_api_type,
-        translate_mode=custom_conf.translate_mode,
-    )
-    img_res = draw_text_on_boxes(inpaint, bboxes, cn_text, text_direction=text_direction)
-    ok, buffer = cv2.imencode(".png", img_res)
-    if not ok:
-        raise RuntimeError("结果图片编码失败")
-
-    cn_file_bytes = buffer.tobytes()
-    file_name = f"{int(time.time() * 1000)}_{random.randint(1000, 9999)}.png"
-    background_tasks.add_task(save_img, cn_file_bytes, "cn", file_name)
-    background_tasks.add_task(save_img, file_bytes, "raw", file_name)
-    b64_img = base64.b64encode(cn_file_bytes).decode("utf8") if include_res_img else None
-    return all_text, cn_text, price, (b64_img, file_name)
+    cn_file_bytes = result["image_bytes"]
+    if not result["cache_hit"] and not result["coalesced"]:
+        file_name = f"{int(time.time() * 1000)}_{random.randint(1000, 9999)}.png"
+        background_tasks.add_task(save_img, cn_file_bytes, "cn", file_name)
+        background_tasks.add_task(save_img, file_bytes, "raw", file_name)
+    b64_img = (await asyncio.to_thread(base64.b64encode, cn_file_bytes)).decode("ascii") if include_res_img else None
+    return {"status": "success", "raw_text": result["raw_text"], "cn_text": result["cn_text"],
+            "price": round(result["price"], 8), "res_img": b64_img, **metadata}
 
 
-def _error_response(info: str, status_code: int) -> JSONResponse:
+def _error_response(info: str, status_code: int, code: str = "TRANSLATION_FAILED") -> JSONResponse:
     return JSONResponse(
         content={
             "status": "error",
             "info": info,
+            "code": code,
         },
         status_code=status_code,
     )
@@ -139,43 +114,34 @@ async def translate_upload(
     img: UploadFile = File(...),
     include_res_img: bool = True,
     text_direction: str = "horizontal",
+    force_refresh: bool = False,
 ):
     start = time.time()
     try:
         text_direction_value = _normalize_text_direction(text_direction)
         file_bytes = await img.read()
-        all_text, cn_text, price, img_result = await _translate_image_bytes(
+        result = await _translate_image_bytes(
             file_bytes=file_bytes,
             include_res_img=include_res_img,
             background_tasks=background_tasks,
             text_direction=text_direction_value,
+            force_refresh=force_refresh,
         )
-        if all_text is None:
-            return JSONResponse(content={
-                "status": "error",
-                "info": "未检测出文字",
-            })
     except ValueError as exc:
         return _error_response(str(exc), 400)
     except MissingTranslateProviderConfigError as exc:
-        return _error_response(str(exc), 400)
+        return _error_response(str(exc), 400, "MISSING_TRANSLATE_CONFIG")
+    except TranslationBusyError as exc:
+        return _error_response(str(exc), 429, "QUEUE_FULL")
     except Exception as e:
         logger.error(f"翻译失败：{e}")
         return JSONResponse(content={
             "status": "error",
             "info": f"{e}",
         })
-    b64_img, file_name = img_result
     duration = round(time.time() - start, 2)
-    logger.info(f"翻译图片成功，耗时 {duration} 秒，保存为{file_name}")
-    return JSONResponse(content={
-        "status": "success",
-        "duration": duration,
-        "price": round(price, 8),
-        "cn_text": cn_text,
-        "raw_text": all_text,
-        "res_img": b64_img,
-    })
+    logger.info(f"图片处理 {result['status']}，耗时 {duration} 秒，分阶段 {result['timings']}")
+    return JSONResponse(content={**result, "duration": duration})
 
 
 class TranslateWebRequest(BaseModel):
@@ -185,6 +151,7 @@ class TranslateWebRequest(BaseModel):
     source_type: Literal["img", "canvas"] | None = None
     include_res_img: bool = True
     text_direction: TextDirection = "horizontal"
+    force_refresh: bool = False
 
     @field_validator("image_url", "image_base64", mode="before")
     @classmethod
@@ -236,32 +203,23 @@ async def translate_web(request: Request, background_tasks: BackgroundTasks):
             raise TranslateWebInputError(400, "请求体必须是 JSON 对象")
 
         req = TranslateWebRequest.model_validate(payload)
+        download_start = time.perf_counter()
         if req.image_url is not None:
             file_bytes = await _download_image_bytes(req.image_url, req.referer)
         else:
             file_bytes = decode_image_base64_data_url(req.image_base64)
-        all_text, cn_text, price, img_result = await _translate_image_bytes(
+        download_duration = round(time.perf_counter() - download_start, 3)
+        result = await _translate_image_bytes(
             file_bytes=file_bytes,
             include_res_img=req.include_res_img,
             background_tasks=background_tasks,
             text_direction=req.text_direction,
+            force_refresh=req.force_refresh,
         )
-        if all_text is None:
-            return JSONResponse(content={
-                "status": "error",
-                "info": "未检测出文字",
-            })
-        b64_img, file_name = img_result
+        result["timings"]["download"] = download_duration
         duration = round(time.time() - start, 2)
-        logger.info(f"翻译图片成功，耗时 {duration} 秒，保存为{file_name}")
-        return JSONResponse(content={
-            "status": "success",
-            "duration": duration,
-            "price": round(price, 8),
-            "cn_text": cn_text,
-            "raw_text": all_text,
-            "res_img": b64_img,
-        })
+        logger.info(f"图片处理 {result['status']}，耗时 {duration} 秒，分阶段 {result['timings']}")
+        return JSONResponse(content={**result, "duration": duration})
     except json.JSONDecodeError:
         return _error_response("请求体不是合法 JSON", 400)
     except ValidationError as exc:
@@ -269,7 +227,9 @@ async def translate_web(request: Request, background_tasks: BackgroundTasks):
     except TranslateWebInputError as exc:
         return _error_response(exc.message, exc.status_code)
     except MissingTranslateProviderConfigError as exc:
-        return _error_response(str(exc), 400)
+        return _error_response(str(exc), 400, "MISSING_TRANSLATE_CONFIG")
+    except TranslationBusyError as exc:
+        return _error_response(str(exc), 429, "QUEUE_FULL")
     except Exception as e:
         logger.error(f"翻译失败：{e}")
         return _error_response(str(e), 500)

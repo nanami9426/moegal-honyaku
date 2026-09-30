@@ -179,6 +179,21 @@ curl -X POST "http://127.0.0.1:8000/api/v1/translate/web" \
 OCR_MAX_CONCURRENCY=2
 ```
 
+自动翻译时，多张图片会重叠执行本地处理和翻译接口等待。气泡检测完成后，OCR 与擦除同时开始，OCR 完成即可请求译文。同步图像计算在线程中执行，避免阻塞其他请求。
+
+```env
+# 同时推进的图片任务数（默认 3）；模型阶段保持单任务，图像处理最多 2 个线程任务。
+IMAGE_TRANSLATE_CONCURRENCY=3
+# 所有图片共用的翻译接口并发上限，逐句翻译也计入此限制。
+TRANSLATE_API_CONCURRENCY=8
+```
+
+`OCR_MAX_CONCURRENCY` 现在是所有图片共享的 OCR 限额。调高并发不一定更快，CPU、显存和接口限流都会影响效果。默认翻译模式仍为 `parallel`，可通过返回的 `timings` 比较检测、OCR、擦除、翻译接口及回填各阶段耗时；重叠阶段的时间不能直接相加。
+
+相同图片内容及相同翻译、排版配置会合并进行中的任务。结果缓存在当前后端进程内，最多 32 项、128 MiB、10 分钟；错误不缓存，重启后清空。最多容纳 16 个待处理及进行中的独立任务，超出返回 HTTP 429 / `QUEUE_FULL`。缓存命中和请求合并分别通过 `cache_hit`、`coalesced` 返回。
+
+没有检测到气泡时，上传和网页接口返回 HTTP 200、`status: "skipped"`、`code: "NO_TEXT_BUBBLES"`，不再执行 OCR、擦除或请求翻译。新版前端会跳过这张图片并继续队列。需要重新检测时，网页 JSON 或上传查询参数可传 `force_refresh: true`（上传为 `?force_refresh=true`）。
+
 `/api/v1/translate/web` 的 JSON 请求体默认最大限制为 `20 MiB`，可通过环境变量调整：
 
 ```env

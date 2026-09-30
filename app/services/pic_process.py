@@ -12,6 +12,8 @@ from app.services.ocr import get_mocr
 from app.services.text_erasure import erase_text_regions
 
 OCR_MAX_CONCURRENCY = max(1, int(os.getenv("OCR_MAX_CONCURRENCY", "2")))
+# 多张图片共用限额，避免自动预翻译把同一 OCR 模型的并发数成倍放大。
+OCR_SEMAPHORE = asyncio.Semaphore(OCR_MAX_CONCURRENCY)
 TextDirection = Literal["horizontal", "vertical"]
 MIN_FONT_SIZE = 1
 
@@ -25,21 +27,24 @@ def _sanitize_bbox(bbox, width: int, height: int):
     return x1, y1, x2, y2
 
 
-async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
+async def recognize_text_regions(image_pil, image_cv, bboxes):
     if len(bboxes) == 0:
-        return [], image_cv
+        return []
 
     height, width = image_cv.shape[:2]
     mocr = get_mocr()
-    semaphore = asyncio.Semaphore(min(OCR_MAX_CONCURRENCY, len(bboxes)))
 
     async def recognize(bbox):
         x1, y1, x2, y2 = _sanitize_bbox(bbox, width, height)
         cropped_image = image_pil.crop((x1, y1, x2, y2))
-        async with semaphore:
+        async with OCR_SEMAPHORE:
             return await asyncio.to_thread(mocr, cropped_image)
 
-    all_text = await asyncio.gather(*(recognize(bbox) for bbox in bboxes))
+    return await asyncio.gather(*(recognize(bbox) for bbox in bboxes))
+
+
+async def get_text_masked_pic(image_pil, image_cv, bboxes, inpaint=True):
+    all_text = await recognize_text_regions(image_pil, image_cv, bboxes)
     if inpaint:
         # 文字掩码生成和背景修复在线程中执行，避免阻塞异步接口。
         image_cv, _ = await asyncio.to_thread(erase_text_regions, image_cv, bboxes)
